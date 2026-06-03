@@ -11,6 +11,6 @@
    NÃO precisa mexer aqui — mantenha este config.js como está.
    ============================================================ */
 window.SUPABASE_CONFIG = {
-  url:     "sb_publishable_cfsw1CjypXHelnFaiOJVRA_UQCP3YpF",
+  url:     "https://oluogutaynlssmzmhcjb.supabase.co",
   anonKey: "sb_publishable_cfsw1CjypXHelnFaiOJVRA_UQCP3YpF"
 };
