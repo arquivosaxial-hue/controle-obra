@@ -1,0 +1,202 @@
+<!DOCTYPE html><html lang="pt-BR"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Operador — Obra Barra do Piraí</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+:root{--bg:#0d1b2a;--panel:#14253a;--panel2:#1b3148;--line:#274057;--txt:#eaf2f9;--txt2:#9bb3c9;--txt3:#65809a;--accent:#3a9bdc;--ok:#2f9e6b;--mid:#c9971f;--off:#3a4654;--calc:#d8d2c4}
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);overflow:hidden}
+.top{height:56px;display:flex;align-items:center;gap:14px;padding:0 18px;background:var(--panel);border-bottom:1px solid var(--line)}
+.top b{font-size:15px}.top .tag{font-size:11px;background:var(--accent);color:#06243a;padding:2px 9px;border-radius:20px;font-weight:700}
+.tabs{display:flex;gap:6px;margin-left:auto}
+.tab{padding:8px 15px;border-radius:8px;border:1px solid var(--line);font-size:13px;cursor:pointer;background:var(--panel2);color:var(--txt2)}
+.tab.on{background:var(--accent);color:#06243a;font-weight:700;border-color:var(--accent)}
+.stage{height:calc(100vh - 56px);display:flex}
+.mapwrap{flex:1;position:relative}#map{position:absolute;inset:0;background:#08131f}
+.camsel{position:absolute;top:12px;left:12px;z-index:600;display:flex;gap:5px;flex-wrap:wrap;max-width:70%}
+.camsel button{font-size:11px;padding:5px 10px;border-radius:7px;border:1px solid var(--line);background:rgba(20,37,58,.92);color:var(--txt2);cursor:pointer}
+.camsel button.on{background:var(--accent);color:#06243a;font-weight:700}
+.legend{position:absolute;bottom:12px;left:12px;z-index:600;background:rgba(20,37,58,.92);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:12px}
+.legend .row{display:flex;align-items:center;gap:7px;margin:3px 0}.legend .sw{width:20px;height:10px;border-radius:3px}
+.side{width:350px;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:15px}
+.side h3{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--txt2);margin:0 0 4px}
+.hint{font-size:12px;color:var(--txt3);line-height:1.5;margin-bottom:11px}
+.it{padding:9px 11px;border:1px solid var(--line);border-radius:9px;margin-bottom:7px;cursor:pointer}
+.it:hover{background:var(--panel2)}.it.sel{border-color:var(--accent);background:var(--panel2)}
+.it .nm{font-size:13px;font-weight:600;display:flex;justify-content:space-between}.it .nm .p{font-variant-numeric:tabular-nums}
+.it .meta{font-size:11px;color:var(--txt3);margin-top:3px}
+.it .bar{height:6px;background:var(--panel2);border-radius:4px;margin-top:6px;overflow:hidden}.it .bar>i{display:block;height:100%}
+.paint{display:flex;gap:6px;margin-top:8px}
+.paint button{flex:1;font-size:12px;padding:7px 0;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--txt);cursor:pointer;font-weight:600}
+.paint button:hover{background:var(--accent);color:#06243a}
+.cams{margin-top:8px}
+.cam{margin:6px 0}.cam .lab{display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px}.cam .lab .v{font-weight:600;font-variant-numeric:tabular-nums}
+.cam .bar{height:7px;background:var(--panel2);border-radius:4px;overflow:hidden}.cam .bar>i{display:block;height:100%}
+.cam .btns{display:flex;gap:5px;margin-top:4px}
+.cam .btns button{flex:1;font-size:11px;padding:5px 0;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--txt);cursor:pointer}
+.cam .btns button:hover{background:var(--accent);color:#06243a}
+.rua-h{font-size:12px;font-weight:700;color:var(--accent);margin:13px 0 6px;text-transform:uppercase}
+.leaflet-popup-content-wrapper{background:var(--panel);color:var(--txt);font-size:12px}.leaflet-popup-tip{background:var(--panel)}
+</style></head><body>
+<div class="top"><b>OPERADOR</b><span class="tag">registra avanço</span>
+<span style="font-size:12px;color:var(--txt2)">Barra do Piraí — Bairro de Fátima</span>
+<div class="tabs"><div class="tab on" data-t="dren">Drenagem</div><div class="tab" data-t="pav">Pavimentação</div></div></div>
+<div class="stage">
+  <div class="mapwrap"><div id="map"></div>
+    <div class="camsel" id="camsel" style="display:none"></div>
+    <div class="legend"><div class="row"><span class="sw" style="background:var(--off)"></span>0%</div>
+      <div class="row"><span class="sw" style="background:var(--mid)"></span>parcial</div>
+      <div class="row"><span class="sw" style="background:var(--ok)"></span>100%</div>
+      <div class="row" id="lg-calc" style="display:none"><span class="sw" style="background:var(--calc)"></span>calçada</div></div>
+  </div>
+  <div class="side">
+    <div id="p-dren"><h3>Trechos de drenagem</h3>
+      <p class="hint">Clique num trecho e marque o avanço executado (pintura parcial permitida).</p>
+      <div id="sel-d"></div><div id="list-d" style="margin-top:10px"></div></div>
+    <div id="p-pav" style="display:none"><h3>Pavimentação — camada: <span id="camName">Geral</span></h3>
+      <p class="hint">O mapa pinta a camada escolhida no topo. Clique num trecho e registre cada serviço (sub-base → base → meio-fio → calçada → CBUQ).</p>
+      <div id="list-p"></div></div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
+<script src="supabase-data.js"></script>
+<script src="obra-loader.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+function __initApp(){
+const D=window.OBRA;
+const CSS=n=>getComputedStyle(document.documentElement).getPropertyValue(n);
+const corPct=p=>p>=100?CSS('--ok'):(p<=0?CSS('--off'):CSS('--mid'));
+const map=L.map('map').setView([D.cy,D.cx],17);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:'© OSM © CARTO',maxZoom:21,subdomains:'abcd'}).addTo(map);
+
+/* ---------- DRENAGEM ---------- */
+const dL={}; let selD=null;
+const drenGroup=L.geoJSON(D.drenagem,{style:f=>({color:corPct(f.properties.pct),weight:5,opacity:.95}),
+  onEachFeature:(f,l)=>{dL[f.properties.id]=l; l.on('click',()=>selectD(f.properties.id));}});
+const ralosGroup=L.geoJSON(D.ralos,{onEachFeature:(f,l)=>{const ll=f.geometry.coordinates.map(p=>[p[1],p[0]]);
+  L.circleMarker(ll[Math.floor(ll.length/2)]||ll[0],{radius:3,color:'#f6932b',weight:1,fillOpacity:.8}).addTo(map);}});
+function repaintD(id){const f=D.drenagem.features.find(x=>x.properties.id===id); dL[id].setStyle({color:corPct(f.properties.pct)});}
+function setD(id,v){D.drenagem.features.find(x=>x.properties.id===id).properties.pct=v; repaintD(id); renderSelD(); renderListD();
+  // grava no banco (trecho_id resolvido por codigo)
+  const tid=(window.__drenIds||{})[id];
+  if(tid){ window.ObraData.setDrenagem(tid,v).catch(e=>console.error('grava drenagem',e)); }
+  else console.warn('sem trecho_id p/ drenagem',id);}
+window.setD=setD;
+async function addMetros(id){
+  const inp=document.getElementById('m-dia');
+  const v=parseFloat(inp&&inp.value);
+  if(!v||v<=0){ if(inp){inp.focus();} return; }
+  const tid=(window.__drenIds||{})[id];
+  if(!tid){ console.warn('sem trecho_id p/ drenagem',id); return; }
+  const f=D.drenagem.features.find(x=>x.properties.id===id);
+  const ext=f.properties.extensao_proj||0;
+  try{
+    const novo=await window.ObraData.addMetrosDrenagem(tid,v);   // soma o do dia
+    const pct = ext>0 ? Math.min(100, Math.round(novo/ext*100)) : 0;
+    f.properties.metros_exec=novo;
+    f.properties.pct=pct;
+    repaintD(id); renderSelD(); renderListD();
+  }catch(e){ console.error('addMetros',e); alert('Erro ao registrar: '+(e.message||e)); }
+}
+window.addMetros=addMetros;
+function selectD(id){selD=id; renderSelD(); renderListD(); const f=D.drenagem.features.find(x=>x.properties.id===id);
+  const ll=f.geometry.coordinates.map(p=>[p[1],p[0]]); map.panTo(ll[Math.floor(ll.length/2)]);}
+function renderSelD(){const b=document.getElementById('sel-d'); if(!selD){b.innerHTML='';return;}
+  const p=D.drenagem.features.find(x=>x.properties.id===selD).properties;
+  const ext=p.extensao_proj||0;
+  const mexec=(p.metros_exec!=null)?p.metros_exec:Math.round((p.pct/100)*ext*100)/100;
+  b.innerHTML=`<div class="it sel"><div class="nm"><span>${p.trecho}</span><span class="p" style="color:${corPct(p.pct)}">${p.pct}%</span></div>
+   <div class="meta">${p.logradouro} · Ø ${p.diametro_m||'?'} m · extensão ${ext||'?'} m</div>
+   <div class="bar"><i style="width:${p.pct}%;background:${corPct(p.pct)}"></i></div>
+   <div class="meta" style="margin-top:6px">Executado: <b>${mexec} m</b> de ${ext} m</div>
+   <div class="paint" style="display:flex;gap:6px;align-items:center;margin-top:8px">
+     <input id="m-dia" type="number" min="0" step="0.5" placeholder="metros feitos hoje"
+       style="flex:1;padding:8px;border-radius:6px;border:1px solid var(--line,#274057);background:#0d1b2a;color:#eaf2f9">
+     <button onclick="addMetros('${selD}')">Registrar</button>
+   </div></div>`;}
+function renderListD(){const c=document.getElementById('list-d'); c.innerHTML='';
+  D.drenagem.features.forEach(f=>{const p=f.properties; const d=document.createElement('div'); d.className='it'+(p.id===selD?' sel':'');
+    d.innerHTML=`<div class="nm"><span>${p.trecho}</span><span class="p" style="color:${corPct(p.pct)}">${p.pct}%</span></div>
+      <div class="bar"><i style="width:${p.pct}%;background:${corPct(p.pct)}"></i></div>`;
+    d.onclick=()=>selectD(p.id); c.appendChild(d);});}
+
+/* ---------- PAVIMENTAÇÃO (trecho × camada) ---------- */
+const LBL={geral:'Geral',subleito:'Subleito',subbase:'Sub-base',base:'Base',meiofio:'Meio-fio',calcada:'Calçada',cbuq:'CBUQ'};
+const ORDER=['geral','subleito','subbase','base','meiofio','calcada','cbuq'];
+const WCAM={subleito:.1,subbase:.2,base:.2,meiofio:.15,calcada:.1,cbuq:.25};
+const trById={}; D.pav_trechos.features.forEach(f=>trById[f.properties.id]=f.properties);
+let camAtiva='geral', selP=null, pavBuilt=false, calcGroup, pavGroup; const pL={};
+function pctTr(id,cam){const t=trById[id]; if(cam==='geral'){let s=0,w=0;for(const c in WCAM){s+=(t.camadas[c]||0)*WCAM[c];w+=WCAM[c];}return Math.round(s/w);} return t.camadas[cam]||0;}
+function buildPav(){
+  calcGroup=L.geoJSON(D.pav_calcada,{style:{weight:0,fillColor:CSS('--calc'),fillOpacity:.8}});
+  pavGroup=L.geoJSON(D.pav_asfalto,{style:f=>({color:'#0c1722',weight:1,fillColor:corPct(pctTr(f.properties.id,camAtiva)),fillOpacity:.92}),
+    onEachFeature:(f,l)=>{pL[f.properties.id]=l; l.on('click',()=>selectP(f.properties.id));
+      l.bindPopup(()=>{const t=trById[f.properties.id]; return `<b>${t.rua}</b> · trecho ${t.trecho}/${t.n_trechos}<br>${t.ext_seg} m`;});}});
+  // seletor camadas
+  const cs=document.getElementById('camsel');
+  ORDER.forEach(c=>{const btn=document.createElement('button'); btn.textContent=LBL[c]; if(c==='geral')btn.classList.add('on');
+    btn.onclick=()=>{camAtiva=c; document.querySelectorAll('#camsel button').forEach(x=>x.classList.remove('on')); btn.classList.add('on');
+      document.getElementById('camName').textContent=LBL[c]; repaintP(); renderListP();}; cs.appendChild(btn);});
+  pavBuilt=true;
+}
+function repaintP(){Object.entries(pL).forEach(([id,l])=>l.setStyle({fillColor:corPct(pctTr(id,camAtiva))}));}
+function setCam(id,cam,v){trById[id].camadas[cam]=v; repaintP(); renderListP();
+  // grava no banco (trecho_id resolvido por codigo)
+  const tid=(window.__pavIds||{})[id];
+  if(tid){ window.ObraData.setPavimentacao(tid,cam,v).catch(e=>console.error('grava pav',e)); }
+  else console.warn('sem trecho_id p/ pavimentacao',id);}
+window.setCam=setCam;
+function selectP(id){selP=id; renderListP(); const f=D.pav_asfalto.features.find(x=>x.properties.id===id);
+  const c=f.geometry.coordinates[0]; map.panTo([c.reduce((a,p)=>a+p[1],0)/c.length,c.reduce((a,p)=>a+p[0],0)/c.length]);}
+function renderListP(){const cont=document.getElementById('list-p'); cont.innerHTML=''; let last=null;
+  D.pav_trechos.features.forEach(f=>{const t=f.properties;
+    if(t.rua!==last){last=t.rua; const h=document.createElement('div'); h.className='rua-h'; h.textContent=t.rua; cont.appendChild(h);}
+    const pv=pctTr(t.id,camAtiva); const d=document.createElement('div'); d.className='it'+(t.id===selP?' sel':'');
+    let cams='';
+    if(t.id===selP){cams='<div class="cams">'+['subleito','subbase','base','meiofio','calcada','cbuq'].map(c=>{const val=t.camadas[c]||0;
+      return `<div class="cam"><div class="lab"><span>${LBL[c]}</span><span class="v" style="color:${corPct(val)}">${val}%</span></div>
+        <div class="bar"><i style="width:${val}%;background:${corPct(val)}"></i></div>
+        <div class="btns">${[0,50,100].map(v=>`<button onclick="event.stopPropagation();setCam('${t.id}','${c}',${v})">${v}%</button>`).join('')}</div></div>`;}).join('')+'</div>';}
+    d.innerHTML=`<div class="nm"><span>Trecho ${t.trecho}/${t.n_trechos}</span><span class="p" style="color:${corPct(pv)}">${pv}%</span></div>
+      <div class="meta">${t.ext_seg} m · ${LBL[camAtiva]}</div>${cams}`;
+    d.onclick=()=>selectP(t.id); cont.appendChild(d);});}
+
+/* ---------- TABS ---------- */
+function setMode(m){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.t===m));
+  document.getElementById('p-dren').style.display=m==='dren'?'block':'none';
+  document.getElementById('p-pav').style.display=m==='pav'?'block':'none';
+  document.getElementById('camsel').style.display=m==='pav'?'flex':'none';
+  document.getElementById('lg-calc').style.display=m==='pav'?'flex':'none';
+  if(m==='dren'){ if(pavBuilt){map.removeLayer(pavGroup);map.removeLayer(calcGroup);} drenGroup.addTo(map); ralosGroup.addTo(map);
+    setTimeout(()=>{map.invalidateSize();map.fitBounds(drenGroup.getBounds().pad(0.1));},40);}
+  else{ if(!pavBuilt)buildPav(); map.removeLayer(drenGroup); map.removeLayer(ralosGroup); calcGroup.addTo(map); pavGroup.addTo(map);
+    setTimeout(()=>{map.invalidateSize();map.fitBounds(pavGroup.getBounds().pad(0.12));},40);}
+}
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>setMode(t.dataset.t));
+drenGroup.addTo(map); ralosGroup.addTo(map); renderListD();
+
+} // fim __initApp
+
+// ---- arranque: carrega do banco, inicia app, religa realtime ----
+(async function(){
+  try{
+    await window.carregarOBRA();
+    __initApp();
+    // realtime: ao mudar avanço, recarrega OBRA e atualiza a tela
+    window.ObraData.subscribe(async ()=>{
+      try{
+        const nova = await window.carregarOBRA();
+        if (window.__onRealtime) window.__onRealtime(nova);
+      }catch(e){ console.error('realtime reload', e); }
+    });
+  }catch(e){
+    console.error('Falha ao carregar do banco:', e);
+    document.body.insertAdjacentHTML('afterbegin',
+      '<div style="background:#e0584a;color:#fff;padding:12px;font-family:sans-serif">'+
+      'Erro ao carregar dados do banco: '+(e.message||e)+'</div>');
+  }
+})();
+</script></body></html>

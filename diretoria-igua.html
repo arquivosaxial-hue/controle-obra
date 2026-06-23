@@ -1,0 +1,152 @@
+<!DOCTYPE html><html lang="pt-BR"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Dashboard — Recomposição Iguá</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
+<script src="supabase-data.js"></script>
+<style>
+:root{--bg:#0a1622;--panel:#11202f;--panel2:#16293c;--line:#243a52;--txt:#eaf2f9;--txt2:#9bb3c9;--txt3:#5d7a96;--accent:#3a9bdc;--agua:#3a9bdc;--esgoto:#c9971f;--capex:#9b7be0;--ok:#2f9e6b}
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);overflow-x:hidden}
+.top{height:64px;display:flex;align-items:center;gap:16px;padding:0 26px;background:var(--panel);border-bottom:1px solid var(--line)}
+.top b{font-size:19px}.top .sub{font-size:13px;color:var(--txt2)}
+.top .tag{font-size:11px;background:var(--accent);color:#06243a;padding:3px 10px;border-radius:20px;font-weight:700}
+.clock{margin-left:auto;font-size:13px;color:var(--txt2);font-variant-numeric:tabular-nums}
+.wrap{padding:26px 32px;max-width:1280px;margin:0 auto}
+.kpis{display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap}
+.kpi{flex:1;min-width:180px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 22px}
+.kpi .v{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums}.kpi .l{font-size:13px;color:var(--txt2);margin-top:4px}
+.kpi .v.ac{color:var(--accent)}.kpi .v.ok{color:var(--ok)}
+.cols{display:grid;grid-template-columns:340px 1fr;gap:22px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+.card h3{font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--txt2);margin-bottom:16px}
+.donut-wrap{display:flex;align-items:center;gap:18px}
+.cat-list{flex:1}
+.cat{margin-bottom:13px}
+.cat .lab{display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px}
+.cat .lab .nm{display:flex;align-items:center;gap:7px}.cat .lab .dot{width:11px;height:11px;border-radius:3px}
+.cat .lab .v{font-variant-numeric:tabular-nums;font-weight:700}
+.cat .track{height:8px;background:var(--panel2);border-radius:5px;overflow:hidden}.cat .track>i{display:block;height:100%;border-radius:5px}
+.chart{position:relative;height:300px;margin-top:6px}
+.bars{display:flex;align-items:flex-end;gap:6px;height:260px;padding-top:10px}
+.col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:0;min-width:0}
+.col .stack{width:100%;display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden;transition:.4s}
+.col .seg{width:100%}
+.col .d{font-size:10px;color:var(--txt3);margin-top:6px;white-space:nowrap;transform:rotate(-45deg);transform-origin:top right;height:30px}
+.col:hover .stack{filter:brightness(1.2)}
+.tip{position:absolute;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12px;pointer-events:none;opacity:0;transition:.1s;z-index:10;white-space:nowrap}
+.legend{display:flex;gap:18px;margin-top:14px;font-size:12px;color:var(--txt2)}
+.legend span{display:flex;align-items:center;gap:6px}.legend i{width:12px;height:12px;border-radius:3px;display:inline-block}
+.note{font-size:12px;color:var(--txt3);margin-top:18px;line-height:1.5}
+</style></head><body>
+<div class="top"><b>RECOMPOSIÇÃO IGUÁ</b><span class="tag">recomposição</span>
+<span class="sub">Contrato 4600007952 · Medição BM16 · 01–30/06/2026</span>
+<span class="clock" id="clock"></span></div>
+<div class="wrap">
+  <div class="kpis" id="kpis"></div>
+  <div class="cols">
+    <div class="card"><h3>Por categoria</h3><div class="donut-wrap">
+      <svg id="donut" width="120" height="120" viewBox="0 0 120 120"></svg>
+      <div class="cat-list" id="catlist"></div>
+    </div></div>
+    <div class="card"><h3>Produção diária (valor medido por dia)</h3>
+      <div class="chart"><div class="tip" id="tip"></div><div class="bars" id="bars"></div></div>
+      <div class="legend">
+        <span><i style="background:var(--agua)"></i>Água</span>
+        <span><i style="background:var(--esgoto)"></i>Esgoto</span>
+        <span><i style="background:var(--capex)"></i>Capex</span></div>
+      <div class="note">Cada barra é um dia de execução; a altura é o valor total dos itens lançados naquele dia, empilhado por categoria. Esta obra é de recomposição asfáltica — sem mapa de rede.</div>
+    </div>
+  </div>
+</div>
+<script>window.IGUA={"obra":"02 - IGUÁ SANEAMENTO","contrato":"4600007952","nome_exib":"RECOMPOSIÇÃO IGUÁ","tipo":"recomposição","medicao":"BM16","total_memoria":144632.46,"total_medicao":164292.4,"categorias":{"ÁGUA":108635.81,"CAPEX":13730.09,"ESGOTO":22266.56},"producao_diaria":[{"data":"2026-06-01","valor":7304.28,"ÁGUA":7304.28},{"data":"2026-06-02","valor":2071.93,"ÁGUA":2071.93},{"data":"2026-06-03","valor":22611.48,"ÁGUA":20313.42,"CAPEX":2298.06},{"data":"2026-06-04","valor":6978.69,"CAPEX":3651.96,"ÁGUA":3326.73},{"data":"2026-06-05","valor":7099.34,"ÁGUA":5065.71,"CAPEX":2033.62},{"data":"2026-06-06","valor":7708.53,"ÁGUA":7708.53},{"data":"2026-06-07","valor":5799.59,"ÁGUA":5799.59},{"data":"2026-06-08","valor":5948.62,"ÁGUA":5253.95,"CAPEX":694.67},{"data":"2026-06-09","valor":21053.52,"ÁGUA":20188.28,"CAPEX":865.24},{"data":"2026-06-10","valor":11138.97,"ÁGUA":8976.52,"CAPEX":2162.45},{"data":"2026-06-11","valor":3544.13,"ÁGUA":3544.13},{"data":"2026-06-12","valor":27821.47,"ESGOTO":22266.56,"ÁGUA":5554.91},{"data":"2026-06-13","valor":6908.96,"ÁGUA":6908.96},{"data":"2026-06-14","valor":8642.95,"ÁGUA":6618.87,"CAPEX":2024.08}],"n_lancamentos":186};</script>
+<script>
+async function __carregarIgua(){
+  try{
+    const D = window.ObraData;
+    // obra da URL (maestro) ou padrão Iguá
+    const p = new URLSearchParams(location.search);
+    const numero = p.get('obra') || '4600007952';
+    const sb = D.sb;
+    const {data:ct} = await sb.from('contratos').select('id,nome').eq('numero',numero).limit(1).single();
+    if(!ct) return; // mantém fallback embutido
+    const cid = ct.id;
+    // categorias do mês
+    const {data:cats} = await sb.from('v_por_categoria_mes').select('categoria,valor').eq('contrato_id',cid);
+    // produção diária quebrada por categoria (direto de lancamentos)
+    const {data:lanc} = await sb.from('lancamentos')
+      .select('data_exec,categoria,valor_total').eq('contrato_id',cid);
+    // só sobrescreve se houver dados reais no banco
+    if(cats && cats.length){
+      const categorias={}; cats.forEach(c=>{ if(c.categoria) categorias[c.categoria]=Number(c.valor); });
+      // agrupa por dia, somando por categoria
+      const porDia={};
+      (lanc||[]).forEach(r=>{
+        const dia=r.data_exec; if(!porDia[dia]) porDia[dia]={data:dia,valor:0};
+        const v=Number(r.valor_total)||0;
+        porDia[dia].valor+=v;
+        if(r.categoria) porDia[dia][r.categoria]=(porDia[dia][r.categoria]||0)+v;
+      });
+      const producao_diaria=Object.values(porDia).sort((a,b)=>a.data<b.data?-1:1);
+      window.IGUA = Object.assign({}, window.IGUA, {
+        categorias,
+        producao_diaria: producao_diaria.length?producao_diaria:window.IGUA.producao_diaria,
+        n_lancamentos: (lanc||[]).length||window.IGUA.n_lancamentos,
+      });
+    }
+  }catch(e){ console.warn('Iguá: usando dados embutidos (banco indisponível ou vazio):', e.message); }
+}
+(async function(){ await __carregarIgua(); __initIgua(); })();
+
+function __initIgua(){
+const D=window.IGUA;
+const CSS=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const BRL=v=>'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const BRLk=v=>'R$ '+(v/1000).toLocaleString('pt-BR',{maximumFractionDigits:1})+'k';
+const COR={'ÁGUA':CSS('--agua'),'ESGOTO':CSS('--esgoto'),'CAPEX':CSS('--capex')};
+
+// KPIs
+document.getElementById('kpis').innerHTML=`
+  <div class="kpi"><div class="v ac">${BRL(D.total_medicao)}</div><div class="l">Valor da medição (BM16, total)</div></div>
+  <div class="kpi"><div class="v">${BRL(D.total_memoria)}</div><div class="l">Memória detalhada (linha a linha)</div></div>
+  <div class="kpi"><div class="v ok">${D.producao_diaria.length}</div><div class="l">Dias de produção</div></div>
+  <div class="kpi"><div class="v">${D.n_lancamentos}</div><div class="l">Lançamentos</div></div>`;
+
+// Donut categorias
+const cats=Object.entries(D.categorias).sort((a,b)=>b[1]-a[1]);
+const totCat=cats.reduce((a,[,v])=>a+v,0);
+let ang=-90; const R=50,CX=60,CY=60; let paths='';
+cats.forEach(([k,v])=>{const frac=v/totCat, a2=ang+frac*360;
+  const x1=CX+R*Math.cos(ang*Math.PI/180), y1=CY+R*Math.sin(ang*Math.PI/180);
+  const x2=CX+R*Math.cos(a2*Math.PI/180), y2=CY+R*Math.sin(a2*Math.PI/180);
+  const large=frac>.5?1:0;
+  paths+=`<path d="M${CX},${CY} L${x1},${y1} A${R},${R} 0 ${large},1 ${x2},${y2} Z" fill="${COR[k]||'#888'}"/>`;
+  ang=a2;});
+document.getElementById('donut').innerHTML=paths+`<circle cx="60" cy="60" r="30" fill="${CSS('--panel')}"/>`;
+document.getElementById('catlist').innerHTML=cats.map(([k,v])=>`<div class="cat">
+  <div class="lab"><span class="nm"><span class="dot" style="background:${COR[k]||'#888'}"></span>${k}</span>
+  <span class="v">${BRL(v)}</span></div>
+  <div class="track"><i style="width:${(v/totCat*100).toFixed(1)}%;background:${COR[k]||'#888'}"></i></div></div>`).join('');
+
+// Produção diária empilhada
+const dias=D.producao_diaria;
+const maxV=Math.max(...dias.map(d=>d.valor));
+const tip=document.getElementById('tip');
+document.getElementById('bars').innerHTML=dias.map(d=>{
+  const h=d.valor/maxV*240;
+  const segs=['ÁGUA','ESGOTO','CAPEX'].map(c=>{const val=d[c]||0; if(!val)return'';
+    return `<div class="seg" style="height:${val/d.valor*100}%;background:${COR[c]}"></div>`;}).join('');
+  const dd=d.data.slice(8,10)+'/'+d.data.slice(5,7);
+  return `<div class="col" data-info="${dd}|${d.valor}|${d['ÁGUA']||0}|${d.ESGOTO||0}|${d.CAPEX||0}">
+    <div class="stack" style="height:${h}px">${segs}</div><div class="d">${dd}</div></div>`;
+}).join('');
+document.querySelectorAll('.col').forEach(c=>{
+  c.addEventListener('mousemove',e=>{const[dd,v,a,es,cx]=c.dataset.info.split('|');
+    tip.innerHTML=`<b>${dd}</b><br>Total: ${BRL(+v)}<br>Água ${BRL(+a)} · Esgoto ${BRL(+es)} · Capex ${BRL(+cx)}`;
+    tip.style.opacity=1; const r=document.getElementById('bars').getBoundingClientRect();
+    tip.style.left=(e.clientX-r.left+10)+'px'; tip.style.top=(e.clientY-r.top-10)+'px';});
+  c.addEventListener('mouseleave',()=>tip.style.opacity=0);
+});
+setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString('pt-BR');},1000);
+document.getElementById('clock').textContent=new Date().toLocaleTimeString('pt-BR');}
+</script></body></html>

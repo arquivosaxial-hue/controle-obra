@@ -1,0 +1,153 @@
+<!DOCTYPE html><html lang="pt-BR"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Diretoria / TV — Obra Barra do Piraí</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+:root{--bg:#0a1622;--panel:#11202f;--panel2:#16293c;--line:#243a52;--txt:#eaf2f9;--txt2:#9bb3c9;--txt3:#5d7a96;--accent:#3a9bdc;--ok:#2f9e6b;--mid:#c9971f;--off:#3a4654;--calc:#d8d2c4}
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);overflow:hidden}
+.top{height:64px;display:flex;align-items:center;gap:18px;padding:0 26px;background:var(--panel);border-bottom:1px solid var(--line)}
+.top b{font-size:20px;letter-spacing:.3px}.top .sub{font-size:13px;color:var(--txt2)}
+.dots{margin-left:auto;display:flex;gap:8px}.dot{width:9px;height:9px;border-radius:50%;background:var(--line);transition:.3s}.dot.on{background:var(--accent);width:26px;border-radius:6px}
+.clock{font-size:13px;color:var(--txt2);font-variant-numeric:tabular-nums;margin-left:14px}
+.stage{height:calc(100vh - 64px);position:relative}
+#map{position:absolute;inset:0;background:#08131f;z-index:1}
+.overlay{position:absolute;inset:0;z-index:2;opacity:0;transition:opacity .6s;pointer-events:none}.overlay.on{opacity:1}
+.banner{position:absolute;top:18px;left:18px;background:rgba(17,32,47,.94);border:1px solid var(--line);border-radius:11px;padding:13px 18px}
+.banner .t{font-size:21px;font-weight:700}.banner .s{font-size:13px;color:var(--txt2);margin-top:2px}
+.camchip{position:absolute;top:18px;right:18px;background:rgba(58,155,220,.16);border:1px solid var(--accent);color:var(--accent);font-weight:700;border-radius:20px;padding:7px 16px;font-size:14px}
+.legend{position:absolute;bottom:18px;left:18px;background:rgba(17,32,47,.94);border:1px solid var(--line);border-radius:11px;padding:12px 16px;font-size:14px}
+.legend .row{display:flex;align-items:center;gap:9px;margin:5px 0}.legend .sw{width:26px;height:13px;border-radius:3px}
+.dash{position:absolute;inset:0;z-index:3;background:var(--bg);padding:34px 44px;opacity:0;transition:opacity .6s;pointer-events:none;display:flex;flex-direction:column}.dash.on{opacity:1}
+.dash h1{font-size:27px;margin-bottom:3px}.dash .sub{font-size:14px;color:var(--txt2);margin-bottom:22px}
+.kpis{display:flex;gap:18px;margin-bottom:22px}
+.kpi{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:16px 22px}
+.kpi .v{font-size:32px;font-weight:800}.kpi .l{font-size:13px;color:var(--txt2);margin-top:3px}
+.kpi .v.ok{color:var(--ok)}.kpi .v.mid{color:var(--mid)}.kpi .v.ac{color:var(--accent)}
+.bars{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:13px 40px;align-content:start}
+.brow{display:flex;flex-direction:column;gap:6px}.brow .lab{display:flex;justify-content:space-between;font-size:15px}.brow .lab .p{font-weight:700;font-variant-numeric:tabular-nums}
+.brow .track{height:14px;background:var(--panel2);border-radius:8px;overflow:hidden}.brow .track>i{display:block;height:100%;border-radius:8px;transition:width 1s}
+.leaflet-control-zoom,.leaflet-control-attribution{display:none}
+</style></head><body>
+<div class="top"><b>Construtora Axial</b><span class="sub">Obra Barra do Piraí — Bairro de Fátima · 10ª medição</span>
+<div class="dots"><div class="dot on"></div><div class="dot"></div><div class="dot"></div></div><span class="clock" id="clock"></span></div>
+<div class="stage">
+  <div id="map"></div>
+  <div class="overlay on" id="ov0">
+    <div class="banner"><div class="t">Rede de Drenagem</div><div class="s">avanço por trecho (PV a PV)</div></div>
+    <div class="legend"><div class="row"><span class="sw" style="background:var(--off)"></span>A executar</div>
+      <div class="row"><span class="sw" style="background:var(--mid)"></span>Em andamento</div>
+      <div class="row"><span class="sw" style="background:var(--ok)"></span>Concluído</div></div>
+  </div>
+  <div class="overlay" id="ov1">
+    <div class="banner"><div class="t">Repavimentação</div><div class="s">por trecho · camada em destaque</div></div>
+    <div class="camchip" id="camchip">CBUQ</div>
+    <div class="legend"><div class="row"><span class="sw" style="background:var(--off)"></span>A executar</div>
+      <div class="row"><span class="sw" style="background:var(--mid)"></span>Em andamento</div>
+      <div class="row"><span class="sw" style="background:var(--ok)"></span>Concluído</div>
+      <div class="row"><span class="sw" style="background:var(--calc)"></span>Calçada</div></div>
+  </div>
+  <div class="dash" id="dash">
+    <h1>Avanço por serviço</h1><div class="sub">medido acumulado ÷ valor de contrato — 10ª medição (mai/26)</div>
+    <div class="kpis" id="kpis"></div><div class="bars" id="bars"></div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
+<script src="supabase-data.js"></script>
+<script src="obra-loader.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+function __initApp(){
+const D=window.OBRA;
+const CSS=n=>getComputedStyle(document.documentElement).getPropertyValue(n);
+const corPct=p=>p>=100?CSS('--ok'):(p<=0?CSS('--off'):CSS('--mid'));
+const map=L.map('map',{zoomControl:false,attributionControl:false}).setView([D.cy,D.cx],17);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:21,subdomains:'abcd'}).addTo(map);
+
+const drenGroup=L.geoJSON(D.drenagem,{style:f=>({color:corPct(f.properties.pct),weight:5,opacity:.95})});
+const ralosGroup=L.geoJSON(D.ralos,{onEachFeature:(f,l)=>{const ll=f.geometry.coordinates.map(p=>[p[1],p[0]]);
+  L.circleMarker(ll[Math.floor(ll.length/2)]||ll[0],{radius:3,color:'#f6932b',weight:1,fillOpacity:.8}).addTo(map);}});
+const calcGroup=L.geoJSON(D.pav_calcada,{style:{weight:0,fillColor:CSS('--calc'),fillOpacity:.85}});
+
+// pavimentação por trecho×camada
+const WCAM={subleito:.1,subbase:.2,base:.2,meiofio:.15,calcada:.1,cbuq:.25};
+const trById={}; D.pav_trechos.features.forEach(f=>trById[f.properties.id]=f.properties);
+let camTV='cbuq'; const pavLayers={};
+function pctTr(id,cam){const t=trById[id]; if(cam==='geral'){let s=0,w=0;for(const c in WCAM){s+=(t.camadas[c]||0)*WCAM[c];w+=WCAM[c];}return Math.round(s/w);} return t.camadas[cam]||0;}
+const pavGroup=L.geoJSON(D.pav_asfalto,{style:f=>({color:'#0c1722',weight:1,fillColor:corPct(pctTr(f.properties.id,camTV)),fillOpacity:.92}),
+  onEachFeature:(f,l)=>{pavLayers[f.properties.id]=l;}});
+function repaintPav(){Object.entries(pavLayers).forEach(([id,l])=>l.setStyle({fillColor:corPct(pctTr(id,camTV))}));}
+
+const LBL={geral:'Geral',subbase:'Sub-base',base:'Base',cbuq:'CBUQ'};
+const CICLO=['cbuq','base','subbase','geral'];
+
+function buildDash(){
+  const rel=D.servicos.filter(s=>s.pct>0||s.contrato>80000);
+  const gal=D.servicos.find(s=>/GALERIA/.test(s.servico));
+  const pav=D.servicos.find(s=>/BASES E PAV/.test(s.servico));
+  const totC=D.servicos.reduce((a,s)=>a+s.contrato,0), totM=D.servicos.reduce((a,s)=>a+s.medido_acumulado,0);
+  document.getElementById('kpis').innerHTML=`
+    <div class="kpi"><div class="v ac">${(totM/totC*100).toFixed(1)}%</div><div class="l">Avanço financeiro geral</div></div>
+    <div class="kpi"><div class="v ok">${gal?gal.pct.toFixed(0):'-'}%</div><div class="l">Galeria / Drenos</div></div>
+    <div class="kpi"><div class="v mid">${pav?pav.pct.toFixed(0):'-'}%</div><div class="l">Bases e Pavimentos</div></div>`;
+  document.getElementById('bars').innerHTML=rel.map(s=>`<div class="brow">
+     <div class="lab"><span>${s.item}. ${s.servico}</span><span class="p" style="color:${corPct(s.pct)}">${s.pct.toFixed(0)}%</span></div>
+     <div class="track"><i style="width:${Math.min(100,s.pct)}%;background:${corPct(s.pct)}"></i></div></div>`).join('');
+}
+buildDash();
+
+let idx=0, camTimer=null;
+function show(i){
+  document.getElementById('ov0').classList.toggle('on',i===0);
+  document.getElementById('ov1').classList.toggle('on',i===1);
+  document.getElementById('dash').classList.toggle('on',i===2);
+  document.querySelectorAll('.dot').forEach((d,k)=>d.classList.toggle('on',k===i));
+  document.getElementById('map').style.visibility=(i===2)?'hidden':'visible';
+  if(camTimer){clearInterval(camTimer);camTimer=null;}
+  if(i===0){[calcGroup,pavGroup].forEach(g=>map.removeLayer(g)); drenGroup.addTo(map); ralosGroup.addTo(map);
+    setTimeout(()=>{map.invalidateSize();map.fitBounds(drenGroup.getBounds().pad(0.1));},50);}
+  if(i===1){[drenGroup,ralosGroup].forEach(g=>map.removeLayer(g)); calcGroup.addTo(map); pavGroup.addTo(map);
+    setTimeout(()=>{map.invalidateSize();map.fitBounds(pavGroup.getBounds().pad(0.14));},50);
+    // alternar a camada destacada a cada 4s enquanto a tela de pav está visível
+    let ci=0; camTV=CICLO[0]; document.getElementById('camchip').textContent=LBL[camTV]; repaintPav();
+    camTimer=setInterval(()=>{ci=(ci+1)%CICLO.length; camTV=CICLO[ci];
+      document.getElementById('camchip').textContent=LBL[camTV]; repaintPav();},4000);}
+}
+show(0);
+setInterval(()=>{idx=(idx+1)%3; show(idx);},12000);
+setInterval(()=>{document.getElementById('clock').textContent=new Date().toLocaleTimeString('pt-BR');},1000);
+document.getElementById('clock').textContent=new Date().toLocaleTimeString('pt-BR');
+
+} // fim __initApp
+
+// TV é só exibição: ao mudar o banco, recarrega para refletir o novo estado.
+window.__onRealtime = function(){
+  // pequeno atraso evita recarregar no meio de várias gravações seguidas
+  clearTimeout(window.__rtTimer);
+  window.__rtTimer = setTimeout(()=>location.reload(), 1500);
+};
+
+// ---- arranque: carrega do banco, inicia app, religa realtime ----
+(async function(){
+  // permite o maestro escolher a obra: diretoria-tv.html?obra=NUMERO
+  const __p = new URLSearchParams(location.search);
+  if (__p.get('obra')) window.__obraNumero = __p.get('obra');
+  try{
+    await window.carregarOBRA();
+    __initApp();
+    // realtime: ao mudar avanço, recarrega OBRA e atualiza a tela
+    window.ObraData.subscribe(async ()=>{
+      try{
+        const nova = await window.carregarOBRA();
+        if (window.__onRealtime) window.__onRealtime(nova);
+      }catch(e){ console.error('realtime reload', e); }
+    });
+  }catch(e){
+    console.error('Falha ao carregar do banco:', e);
+    document.body.insertAdjacentHTML('afterbegin',
+      '<div style="background:#e0584a;color:#fff;padding:12px;font-family:sans-serif">'+
+      'Erro ao carregar dados do banco: '+(e.message||e)+'</div>');
+  }
+})();
+</script></body></html>

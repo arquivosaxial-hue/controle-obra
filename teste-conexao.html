@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Teste de Conexão — Supabase</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
+<style>
+:root{--bg:#0d1b2a;--panel:#14253a;--line:#274057;--txt:#eaf2f9;--txt2:#9bb3c9;--ok:#2f9e6b;--err:#e0584a;--accent:#3a9bdc}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;padding:32px}
+.wrap{max-width:720px;margin:0 auto}
+h1{font-size:18px;margin-bottom:6px}.sub{font-size:13px;color:var(--txt2);margin-bottom:22px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:12px}
+.card h2{font-size:13px;color:var(--txt2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:center;font-size:14px;padding:7px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:none}
+.badge{font-size:12px;font-weight:700;padding:3px 11px;border-radius:20px}
+.badge.ok{background:rgba(47,158,107,.18);color:var(--ok)}
+.badge.err{background:rgba(224,88,74,.18);color:var(--err)}
+.badge.wait{background:rgba(155,179,201,.18);color:var(--txt2)}
+.num{font-variant-numeric:tabular-nums;font-weight:700;color:var(--accent)}
+pre{font-size:12px;color:var(--err);white-space:pre-wrap;margin-top:8px}
+.ok-msg{margin-top:18px;padding:14px;border:1px solid var(--ok);border-radius:11px;background:rgba(47,158,107,.08);font-size:14px;display:none}
+.ok-msg.show{display:block}
+</style></head><body>
+<div class="wrap">
+  <h1>Teste de Conexão — Supabase</h1>
+  <div class="sub">Confirma que o front fala com o banco e que os dados do seed estão lá.</div>
+  <div class="card"><h2>Conexão</h2>
+    <div class="row"><span>Cliente Supabase</span><span id="b-cli" class="badge wait">testando…</span></div>
+    <div class="row"><span>Project URL</span><span id="b-url" style="font-size:12px;color:var(--txt2)"></span></div>
+  </div>
+  <div class="card"><h2>Dados (do seed)</h2>
+    <div class="row"><span>Obras (contratos)</span><span class="num" id="n-obras">—</span></div>
+    <div class="row"><span>Trechos de drenagem</span><span class="num" id="n-dren">—</span></div>
+    <div class="row"><span>Trechos de pavimentação</span><span class="num" id="n-pav">—</span></div>
+    <div class="row"><span>Serviços (avanço)</span><span class="num" id="n-serv">—</span></div>
+  </div>
+  <div class="card"><h2>Escrita (RLS)</h2>
+    <div class="row"><span>Gravar sem login deve ser BLOQUEADO</span><span id="b-rls" class="badge wait">testando…</span></div>
+  </div>
+  <div id="okmsg" class="ok-msg">✅ Tudo certo! A conexão funciona e os dados estão no banco. Pode seguir para conectar as telas.</div>
+  <pre id="erro"></pre>
+</div>
+<script>
+(async()=>{
+  const setB=(id,ok,txt)=>{const e=document.getElementById(id);e.className='badge '+(ok?'ok':'err');e.textContent=txt;};
+  document.getElementById('b-url').textContent=window.SUPA_URL;
+  let sb;
+  try{ sb=window.makeSupa(); setB('b-cli',true,'OK'); }
+  catch(e){ setB('b-cli',false,'falhou'); document.getElementById('erro').textContent=e.message; return; }
+
+  async function count(tabela){
+    const {count,error}=await sb.from(tabela).select('*',{count:'exact',head:true});
+    if(error) throw new Error(tabela+': '+error.message);
+    return count;
+  }
+  try{
+    document.getElementById('n-obras').textContent=await count('contratos');
+    document.getElementById('n-dren').textContent=await count('drenagem_trechos');
+    document.getElementById('n-pav').textContent=await count('pavimentacao_trechos');
+    document.getElementById('n-serv').textContent=await count('avanco_servicos');
+  }catch(e){ document.getElementById('erro').textContent='Leitura: '+e.message; }
+
+  // RLS: inserir sem login deve falhar
+  try{
+    const {error}=await sb.from('drenagem_avanco').insert({trecho_id:'00000000-0000-0000-0000-000000000000',pct:50});
+    if(error){ setB('b-rls',true,'bloqueado ✓'); }
+    else { setB('b-rls',false,'PERMITIU (revisar RLS)'); }
+  }catch(e){ setB('b-rls',true,'bloqueado ✓'); }
+
+  // mensagem final
+  const obras=+document.getElementById('n-obras').textContent;
+  if(obras>0) document.getElementById('okmsg').classList.add('show');
+})();
+</script></body></html>
