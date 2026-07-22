@@ -179,6 +179,10 @@
   .readonly .cell-input:hover{ border-color:transparent !important }
   .readonly .rowdel{ display:none }
   .btn:disabled{ opacity:.45; cursor:not-allowed }
+  .benef-in{ font:inherit; font-size:.86rem; padding:6px 9px; border:1px solid #cbd5e1;
+    border-radius:7px; background:#fff; color:inherit }
+  .benef-in:focus{ outline:none; border-color:var(--axial); box-shadow:0 0 0 2px rgba(8,77,57,.12) }
+  .benef-in[readonly]{ background:#f1f5f9; color:#475569; cursor:default }
 </style>
 
 <div id="dts-root">
@@ -337,23 +341,23 @@
           <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
             <label style="display:flex;flex-direction:column;gap:4px">
               <span class="ff-lbl">Mês do benefício</span>
-              <input type="month" id="benefRef" class="cell-input" style="min-width:150px">
+              <input type="month" id="benefRef" class="benef-in" style="min-width:150px">
             </label>
             <label style="display:flex;flex-direction:column;gap:4px">
               <span class="ff-lbl">Início da apuração</span>
-              <input type="date" id="benefIni" class="cell-input" style="min-width:150px">
+              <input type="date" id="benefIni" class="benef-in" style="min-width:150px">
             </label>
             <label style="display:flex;flex-direction:column;gap:4px">
               <span class="ff-lbl">Fim da apuração</span>
-              <input type="date" id="benefFim" class="cell-input" style="min-width:150px" readonly>
+              <input type="date" id="benefFim" class="benef-in" style="min-width:150px" readonly>
             </label>
             <label style="display:flex;flex-direction:column;gap:4px">
               <span class="ff-lbl">Dias úteis do mês <b style="color:#c00">*manual*</b></span>
-              <input type="number" id="benefBase" class="cell-input" min="0" max="31" style="min-width:110px">
+              <input type="number" id="benefBase" class="benef-in" min="0" max="31" style="min-width:110px">
             </label>
             <label style="display:flex;flex-direction:column;gap:4px">
               <span class="ff-lbl">Limiar extra (min)</span>
-              <input type="number" id="benefLimiar" class="cell-input" value="180" min="1" style="min-width:110px">
+              <input type="number" id="benefLimiar" class="benef-in" value="180" min="1" style="min-width:110px">
             </label>
           </div>
           <p class="hint" style="margin:0 0 12px">
@@ -400,7 +404,7 @@
     <footer class="ft">Atualizado em <span id="today"></span> &middot; Dados: Efetivo + Previsão de Férias Iguá</footer>
   </div>
   <div class="saved-flash" id="flash">✓ Salvo</div>
-  <div class="ver-badge" id="verBadge">V 2.0</div>
+  <div class="ver-badge" id="verBadge">V 2.0.2</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1170,9 +1174,6 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     document.querySelectorAll('.cell-input, .sit-sel').forEach(el=>{ el.disabled=!logged; });
   }
 
-  start();
-})();
-
 /* ==================== MÓDULO DE BENEFÍCIOS (VR/VA) ====================
    Parser do espelho de ponto Wponto/Alterdata + regras de cálculo.
    Validado contra o espelho 16/06-15/07/2026: total 608 dias, 2 ocorrências 3h+.
@@ -1209,10 +1210,13 @@ function benefInit(){
   var logged = canEdit();
   $('benefLock').style.display = logged ? 'none' : '';
   $('benefForm').style.display = logged ? '' : 'none';
-  if(benefState.inited) return;
+  if(benefState.inited){ benefSyncDatas(); return; }
   benefState.inited=true;
   $('benefRef').addEventListener('change', benefSyncDatas);
+  $('benefRef').addEventListener('input', benefSyncDatas);
   $('benefIni').addEventListener('change', benefSyncDatas);
+  $('benefIni').addEventListener('input', benefSyncDatas);
+  benefSyncDatas();
   $('benefPdfBtn').addEventListener('click', function(){ $('benefPdfInput').click(); });
   $('benefPdfInput').addEventListener('change', function(e){
     if(e.target.files && e.target.files[0]) benefProcessaPdf(e.target.files[0]);
@@ -1288,8 +1292,10 @@ function benefIsoDe(br){ var p=br.split('/'); return p[2]+'-'+p[1]+'-'+p[0]; }
 
 /* ---------- processamento principal ---------- */
 async function benefProcessaPdf(file){
+  benefSyncDatas();
   var ini=$('benefIni').value, fim=$('benefFim').value, base=+$('benefBase').value;
-  if(!ini || !fim){ benefMsg('Informe o mês do benefício e o início da apuração antes de anexar o PDF.',true); return; }
+  if(!ini){ benefMsg('Informe o <b>início da apuração</b> (dia 16 do mês).',true); return; }
+  if(!fim){ benefMsg('Não foi possível calcular o fim da apuração. Confira a data de início.',true); return; }
   if(!base || base<1){ benefMsg('Informe os <b>dias úteis do mês</b> (preenchimento manual obrigatório).',true); return; }
   var limiar = +$('benefLimiar').value || 180;
 
@@ -1640,5 +1646,9 @@ function benefGerarXlsx(){
   XLSX.writeFile(wb,nm);
   benefMsg('✓ Planilha gerada: '+nm);
 }
+
+
+  start();
+})();
 
 </script>
