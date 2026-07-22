@@ -404,11 +404,12 @@
     <footer class="ft">Atualizado em <span id="today"></span> &middot; Dados: Efetivo + Previsão de Férias Iguá</footer>
   </div>
   <div class="saved-flash" id="flash">✓ Salvo</div>
-  <div class="ver-badge" id="verBadge">V 2.0.2</div>
+  <div class="ver-badge" id="verBadge">V 2.1</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js"></script>
 <script>
@@ -1290,6 +1291,19 @@ function benefExtraMin(resto){
 
 function benefIsoDe(br){ var p=br.split('/'); return p[2]+'-'+p[1]+'-'+p[0]; }
 
+/* ISO local (nunca toISOString: converte p/ UTC e pode virar o dia anterior) */
+function benefIsoLocal(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+
+         String(d.getDate()).padStart(2,'0');
+}
+/* soma n dias a uma data ISO sem passar por Date/fuso */
+function benefAddDias(iso, n){
+  var p=iso.split('-');
+  var d=new Date(+p[0], +p[1]-1, +p[2]);
+  d.setDate(d.getDate()+n);
+  return benefIsoLocal(d);
+}
+
 /* ---------- processamento principal ---------- */
 async function benefProcessaPdf(file){
   benefSyncDatas();
@@ -1308,11 +1322,8 @@ async function benefProcessaPdf(file){
 
   var emitido = (txt.match(/(\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2})/)||[])[1] || null;
 
-  var dIni=new Date(ini+'T00:00:00'), dFim=new Date(fim+'T00:00:00');
-  var noPeriodo = {};
-  for(var d=new Date(dIni); d<=dFim; d.setDate(d.getDate()+1)){
-    noPeriodo[d.toISOString().slice(0,10)]=true;
-  }
+  var noPeriodo = {}, _cur = ini;
+  while(_cur <= fim){ noPeriodo[_cur]=true; _cur = benefAddDias(_cur, 1); }
 
   var blocos = txt.split('Relatório de Ponto');
   var linhas=[], vistos={};
@@ -1503,150 +1514,306 @@ async function benefGravar(){
   }catch(e){ benefMsg('Erro ao gravar: '+(e.message||e),true); }
 }
 
-/* ---------- geração do .xlsx (4 abas, com fórmulas) ---------- */
-function benefGerarXlsx(){
+/* Gera o .xlsx com ExcelJS (SheetJS community nao escreve estilos).
+   Replica CONTROLE_BENEFICIOS_AGOSTO_2026.xlsx: cores, Arial, dropdown,
+   formatacao condicional por codigo, freeze panes e formulas. */
+async function benefGerarXlsx(){
   if(!benefState.linhas.length){ benefMsg('Nada para exportar.',true); return; }
+  if(typeof ExcelJS==='undefined'){ benefMsg('A biblioteca ExcelJS não carregou. Recarregue a página.',true); return; }
   var c=benefState.comp, L=benefState.linhas;
-  var wb=XLSX.utils.book_new();
-  var ini=new Date(c.periodo_inicio+'T00:00:00');
-  var NS=31;
+  var NS=31, C0=4, HDR=6, R0=7;                 /* grade D(4)..AH ; cabecalho L6 ; dados L7 */
+  var nLin=L.length, LAST=R0+nLin-1, TOTR=LAST+1;
+  var MESES=['JANEIRO','FEVEREIRO','MARÇO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO',
+             'SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'];
+  var mesBenef=MESES[+c.referencia.slice(5,7)-1];
+  var hExt=(c.limiar_extra_min/60).toFixed(2).replace('.',',');
 
-  function colLetra(n){ var s=''; n++; while(n>0){ var m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-m-1)/26; } return s; }
-  function serial(d){ return Math.round((d-new Date(Date.UTC(1899,11,30)))/86400000); }
+  function CL(n){ var s='',x=n; while(x>0){ var m=(x-1)%26; s=String.fromCharCode(65+m)+s; x=(x-m-1)/26; } return s; }
+  function dt(iso){ var p=iso.split('-'); return new Date(Date.UTC(+p[0],+p[1]-1,+p[2])); }
+  function ARI(sz,b,i,cor){ return {name:'Arial',size:sz,bold:!!b,italic:!!i,color:{argb:cor||'FF000000'}}; }
+  function FILL(rgb){ return {type:'pattern',pattern:'solid',fgColor:{argb:rgb}}; }
+  var THIN={style:'thin',color:{argb:'FF999999'}};
+  var BD={top:THIN,left:THIN,bottom:THIN,right:THIN};
+  var HDRF=FILL('FF1F4E79'), INF=FILL('FFFFFF00'), TOTF=FILL('FFD9E1F2'), RESF=FILL('FFC6E0B4');
+  var CT={horizontal:'center',vertical:'middle'};
 
-  /* ---- Aba 1: CONTROLE ---- */
-  var ws={}; var HDR=6, C0=3;
-  function set(r,cc,v,t){ ws[XLSX.utils.encode_cell({r:r,c:cc})]= t==='f'?{t:'n',f:v}:{t:t||'s',v:v}; }
+  var wb=new ExcelJS.Workbook();
+  wb.creator='Controle de Obra Iguá'; wb.created=new Date();
 
-  set(0,0,'CONTROLE DE BENEFÍCIOS – RECOMPOSIÇÃO IGUÁ');
-  set(1,0,'Apuração: '+c.periodo_inicio.split('-').reverse().join('/')+
-          ' a '+c.periodo_fim.split('-').reverse().join('/')+
-          '   →   Benefício de referência: '+c.referencia.slice(0,7));
-  set(2,0,'Amarelo = preenchimento manual. Ao trocar a competência, altere C3, C4 e C5.');
-  set(2,1,'INÍCIO DA APURAÇÃO:'); ws[XLSX.utils.encode_cell({r:2,c:2})]={t:'n',v:serial(ini),z:'dd/mm/yyyy'};
-  set(3,1,'MÊS DO BENEFÍCIO:');
-  ws[XLSX.utils.encode_cell({r:3,c:2})]={t:'n',v:serial(new Date(c.referencia+'T00:00:00')),z:'mmmm/yyyy'};
-  set(4,1,'DIAS ÚTEIS DO MÊS:'); set(4,2,c.base_dias_uteis,'n');
+  /* ================= ABA 1: CONTROLE ================= */
+  var ws=wb.addWorksheet('CONTROLE',{views:[{state:'frozen',xSplit:3,ySplit:6}]});
+  ws.getCell('A1').value='CONTROLE DE BENEFÍCIOS – RECOMPOSIÇÃO IGUÁ';
+  ws.getCell('A1').font=ARI(12,true);
+  ws.getCell('A2').value={formula:'"Apuração do ponto: "&DAY($C$2)&"/"&MONTH($C$2)&"/"&YEAR($C$2)'+
+    '&" a "&DAY(EDATE($C$2,1)-1)&"/"&MONTH(EDATE($C$2,1)-1)&"/"&YEAR(EDATE($C$2,1)-1)'+
+    '&"   →   Benefício de referência: "&CHOOSE(MONTH($C$3),"'+MESES.join('","')+'")&"/"&YEAR($C$3)'};
+  ws.getCell('A2').font=ARI(10,false,true);
+  ws.getCell('A3').value='Amarelo = preenchimento manual. Ao trocar a competência, altere apenas C2, C3 e C4 — as datas e os dias da semana se atualizam sozinhos.';
+  ws.getCell('A3').font=ARI(9,false,true,'FFC00000');
 
-  set(HDR,0,'Matrícula'); set(HDR,1,'Nome do Funcionário'); set(HDR,2,'Função');
-  var FIM='(EDATE($C$3,1)-1)';
+  [['B2','INÍCIO DA APURAÇÃO DO PONTO:'],['B3','MÊS DO BENEFÍCIO:'],
+   ['B4','DIAS ÚTEIS DO MÊS DO BENEFÍCIO:']].forEach(function(x){
+    var cel=ws.getCell(x[0]); cel.value=x[1];
+    cel.font=ARI(10,true); cel.alignment={horizontal:'right'};
+  });
+  function inp(ref,val,fmt){
+    var cel=ws.getCell(ref); cel.value=val;
+    cel.font=ARI(11,true,false,'FF0000FF'); cel.fill=INF; cel.border=BD;
+    cel.alignment={horizontal:'center'}; if(fmt) cel.numFmt=fmt;
+  }
+  inp('C2',dt(c.periodo_inicio),'dd/mm/yyyy');
+  inp('C3',dt(c.referencia),'mmmm/yyyy');
+  inp('C4',c.base_dias_uteis);
+  ws.getCell('C2').note='Primeiro dia do período de apuração do ponto (ex.: 16/07/2026 para o benefício de setembro).\nA grade e os dias da semana se atualizam automaticamente.';
+  ws.getCell('C3').note='Primeiro dia do mês em que o benefício será pago (ex.: 01/09/2026).\nUsado apenas nos títulos.';
+  ws.getCell('C4').note='Preenchimento MANUAL — informe os dias úteis do mês do benefício, já descontando feriados nacionais, estaduais e municipais.';
+
+  ['A','B','C'].forEach(function(L2,i){
+    var cel=ws.getCell(L2+HDR);
+    cel.value=['Matrícula','Nome do Funcionário','Função'][i];
+    cel.font=ARI(10,true,false,'FFFFFFFF'); cel.fill=HDRF; cel.border=BD; cel.alignment=CT;
+  });
   for(var j=0;j<NS;j++){
-    var cc=C0+j, Lc=colLetra(cc);
-    set(HDR-1,cc,'IF('+Lc+(HDR+1)+'="","",CHOOSE(WEEKDAY('+Lc+(HDR+1)+'),"dom","seg","ter","qua","qui","sex","sáb"))','f');
-    ws[XLSX.utils.encode_cell({r:HDR,c:cc})]={t:'n',f:'IF($C$3+'+j+'<='+FIM.slice(1,-1)+',$C$3+'+j+',"")',z:'dd/mm'};
+    var cc=C0+j, Lc=CL(cc);
+    var cw=ws.getCell(Lc+(HDR-1));
+    cw.value={formula:'IF('+Lc+HDR+'="","",CHOOSE(WEEKDAY('+Lc+HDR+'),"dom","seg","ter","qua","qui","sex","sáb"))'};
+    cw.font=ARI(8,true); cw.alignment={horizontal:'center'};
+    var cdd=ws.getCell(Lc+HDR);
+    cdd.value={formula:'IF($C$2+'+j+'<=(EDATE($C$2,1)-1),$C$2+'+j+',"")'};
+    cdd.numFmt='dd/mm'; cdd.font=ARI(8,true,false,'FFFFFFFF'); cdd.fill=HDRF;
+    cdd.border=BD; cdd.alignment={horizontal:'center'};
   }
   var TOT=['SÁBADO','DOMINGO','FERIADO','TOTAL A ADICIONAR','FALTA','ATESTADO','FALTA ABONADA',
-           'TOTAL A DESCONTAR','FÉRIAS','EXAME','ATESTADO FDS','INSS','DIAS DE BENEFÍCIO'];
-  TOT.forEach(function(t,i){ set(HDR,C0+NS+i,t); });
+           'TOTAL A DESCONTAR','FÉRIAS','EXAME','ATESTADO FDS','INSS','DIAS DE BENEFÍCIO '+mesBenef];
+  TOT.forEach(function(t,i){
+    var cel=ws.getCell(CL(C0+NS+i)+HDR); cel.value=t;
+    cel.font=ARI(9,true,false,'FFFFFFFF'); cel.fill=HDRF; cel.border=BD;
+    cel.alignment=Object.assign({wrapText:true},CT);
+  });
+  ws.getRow(HDR).height=30;
 
   L.forEach(function(l,ri){
-    var r=HDR+1+ri;
-    set(r,0,l.matricula); set(r,1,l.nome); set(r,2,l.funcao||'');
+    var r=R0+ri;
+    var a=ws.getCell('A'+r); a.value=l.matricula; a.font=ARI(10); a.alignment={horizontal:'center'}; a.border=BD;
+    var b=ws.getCell('B'+r); b.value=l.nome; b.font=ARI(10); b.border=BD;
+    var f=ws.getCell('C'+r); f.value=l.funcao||''; f.font=ARI(10); f.border=BD;
     var mapa={}; (l._ocor||[]).forEach(function(o){ if(o.codigo) mapa[o.data]=o.codigo; });
-    for(var j=0;j<NS;j++){
-      var d=new Date(ini); d.setDate(d.getDate()+j);
-      var iso=d.toISOString().slice(0,10);
-      if(iso<=c.periodo_fim && mapa[iso]) set(r,C0+j,mapa[iso]);
+    for(var j2=0;j2<NS;j2++){
+      var iso=benefAddDias(c.periodo_inicio,j2);
+      var cel=ws.getCell(CL(C0+j2)+r);
+      cel.value=(iso<=c.periodo_fim && mapa[iso]) ? mapa[iso] : null;
+      cel.font=ARI(10,false,false,'FF0000FF'); cel.fill=INF; cel.border=BD; cel.alignment=CT;
     }
-    var A=colLetra(C0), B=colLetra(C0+NS-1), rg=A+(r+1)+':'+B+(r+1);
-    var f=[
-      'COUNTIF('+rg+',"S")','COUNTIF('+rg+',"D")','COUNTIF('+rg+',"FR")',
-      null,
-      'COUNTIF('+rg+',"F")','COUNTIF('+rg+',"A")','COUNTIF('+rg+',"FA")',
-      null,
-      'COUNTIF('+rg+',"FE")','COUNTIF('+rg+',"E")','COUNTIF('+rg+',"AFS")','COUNTIF('+rg+',"IN")',
-      null
-    ];
-    var cAdd=colLetra(C0+NS+3), cDesc=colLetra(C0+NS+7);
-    f[3]='SUM('+colLetra(C0+NS)+(r+1)+':'+colLetra(C0+NS+2)+(r+1)+')';
-    f[7]='SUM('+colLetra(C0+NS+4)+(r+1)+':'+colLetra(C0+NS+6)+(r+1)+')';
-    f[12]='IF('+colLetra(C0+NS+11)+(r+1)+'>0,0,MAX(0,$C$5+'+cAdd+(r+1)+'-'+cDesc+(r+1)+'))';
-    f.forEach(function(x,i){ if(x) set(r,C0+NS+i,x,'f'); });
+    var rg='$'+CL(C0)+r+':$'+CL(C0+NS-1)+r;
+    var cods=['S','D','FR',null,'F','A','FA',null,'FE','E','AFS','IN',null];
+    cods.forEach(function(k,i){
+      if(!k) return;
+      var cel=ws.getCell(CL(C0+NS+i)+r);
+      cel.value={formula:'COUNTIF('+rg+',"'+k+'")'};
+      cel.font=ARI(10); cel.fill=TOTF; cel.border=BD; cel.alignment=CT;
+    });
+    function soma(idx,a1,a2,a3){
+      var cel=ws.getCell(CL(C0+NS+idx)+r);
+      cel.value={formula:CL(C0+NS+a1)+r+'+'+CL(C0+NS+a2)+r+'+'+CL(C0+NS+a3)+r};
+      cel.font=ARI(10,true); cel.fill=TOTF; cel.border=BD; cel.alignment=CT;
+    }
+    soma(3,0,1,2); soma(7,4,5,6);
+    var res=ws.getCell(CL(C0+NS+12)+r);
+    res.value={formula:'IF('+CL(C0+NS+11)+r+'>0,0,MAX(0,$C$4+'+CL(C0+NS+3)+r+'-'+CL(C0+NS+7)+r+'))'};
+    res.font=ARI(11,true); res.fill=RESF; res.border=BD; res.alignment=CT;
   });
-  var lastR=HDR+L.length+1;
-  set(lastR,1,'TOTAL');
-  for(var i=0;i<TOT.length;i++){
-    var cl=colLetra(C0+NS+i);
-    set(lastR,C0+NS+i,'SUM('+cl+(HDR+2)+':'+cl+(HDR+1+L.length)+')','f');
-  }
-  ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:lastR,c:C0+NS+TOT.length}});
-  ws['!cols']=[{wch:10},{wch:38},{wch:26}].concat(
-    Array(NS).fill({wch:5}), TOT.map(function(){return {wch:13};}));
-  XLSX.utils.book_append_sheet(wb,ws,'CONTROLE');
 
-  /* ---- Aba 2: LEGENDA ---- */
-  var leg=[['CÓDIGO','SIGNIFICADO','EFEITO'],
-    ['(vazio)','Dia útil trabalhado normalmente, ou folga','Nenhum'],
-    ['S','Sábado trabalhado','+1'],['D','Domingo trabalhado','+1'],
-    ['FR','Feriado trabalhado','+1'],['F','Falta injustificada','−1'],
-    ['A','Atestado/licença em DIA ÚTIL','−1'],
-    ['AFS','Atestado/licença em sábado, domingo ou feriado','Nenhum'],
-    ['FA','Falta abonada','−1'],['FE','Férias','Nenhum'],
-    ['E','Exame periódico / troca de função','Nenhum'],
-    ['IN','Afastamento INSS (acima de 15 dias)','Zera o benefício'],
-    [],['FÓRMULA'],
-    ['dias = base + sábados + domingos + feriados − faltas − atestados(dia útil) − faltas abonadas'],
-    ['Travas: INSS no período zera o resultado; mínimo 0.'],
-    [],['PREMISSAS'],
-    ['Período de apuração: dia 16 até dia 15 do mês seguinte.'],
-    ['Dia útil trabalhado não gera nada (já foi pago no mês anterior).'],
-    ['Atestado em fim de semana (AFS) não desconta.'],
-    ['Dias úteis do mês: preenchimento MANUAL (feriados regionais).'],
-    ['Adicional VR: R$ 30,00 por dia útil com '+(c.limiar_extra_min/60).toFixed(2).replace('.',',')+'h+ de extra.'],
+  var tl=ws.getCell('B'+TOTR); tl.value='TOTAL';
+  tl.font=ARI(10,true); tl.fill=TOTF; tl.border=BD; tl.alignment={horizontal:'right'};
+  ['A','C'].forEach(function(x){ var cel=ws.getCell(x+TOTR); cel.fill=TOTF; cel.border=BD; });
+  for(var j3=0;j3<NS;j3++){ var cel=ws.getCell(CL(C0+j3)+TOTR); cel.fill=TOTF; cel.border=BD; }
+  for(var i2=0;i2<TOT.length;i2++){
+    var cl=CL(C0+NS+i2), cel2=ws.getCell(cl+TOTR);
+    cel2.value={formula:'SUM('+cl+R0+':'+cl+LAST+')'};
+    cel2.font=ARI(i2===TOT.length-1?11:10,true);
+    cel2.fill=(i2===TOT.length-1)?RESF:TOTF; cel2.border=BD; cel2.alignment=CT;
+  }
+
+  ws.getColumn(1).width=10; ws.getColumn(2).width=38; ws.getColumn(3).width=26;
+  for(var k=0;k<NS;k++) ws.getColumn(C0+k).width=4.9;
+  [10,10,9,11,8,10,12,11,8,8,11,7,14].forEach(function(w,i){ ws.getColumn(C0+NS+i).width=w; });
+
+  var GRID=CL(C0)+R0+':'+CL(C0+NS-1)+LAST;
+  for(var rr=R0;rr<=LAST;rr++){
+    for(var cc2=C0;cc2<C0+NS;cc2++){
+      ws.getCell(CL(cc2)+rr).dataValidation={type:'list',allowBlank:true,
+        formulae:['"S,D,FR,F,A,AFS,FA,FE,E,IN"']};
+    }
+  }
+  [[['S','D','FR'],'FFC6E0B4'],[['F','A','FA'],'FFFF9999'],
+   [['FE','AFS'],'FFD9D9D9'],[['E'],'FFBDD7EE'],[['IN'],'FFA6A6A6']].forEach(function(g){
+    g[0].forEach(function(cod){
+      ws.addConditionalFormatting({ref:GRID,rules:[{type:'cellIs',operator:'equal',
+        formulae:['"'+cod+'"'],style:{fill:FILL(g[1])}}]});
+    });
+  });
+  ws.addConditionalFormatting({ref:CL(C0)+R0+':'+CL(C0+NS-1)+LAST,
+    rules:[{type:'expression',formulae:[CL(C0)+'$'+HDR+'=""'],style:{fill:FILL('FF808080')}}]});
+  ws.addConditionalFormatting({ref:CL(C0)+(HDR-1)+':'+CL(C0+NS-1)+(HDR-1),
+    rules:[{type:'expression',
+      formulae:['AND('+CL(C0)+'$'+HDR+'<>"",WEEKDAY('+CL(C0)+'$'+HDR+',2)>5)'],
+      style:{fill:FILL('FFFCE4D6')}}]});
+
+  /* ================= ABA 2: LEGENDA ================= */
+  var wl=wb.addWorksheet('LEGENDA');
+  var lg=[['LEGENDA DE CÓDIGOS'],[],
+    ['Código','Significado','Efeito no benefício do mês seguinte'],
+    ['(vazio)','Dia útil trabalhado normalmente / folga','Nenhum – já foi pago no mês anterior'],
+    ['S','Sábado trabalhado','+1 dia'],['D','Domingo trabalhado','+1 dia'],
+    ['FR','Feriado trabalhado','+1 dia'],['F','Falta injustificada','−1 dia'],
+    ['A','Atestado / licença médica em DIA ÚTIL (até 15 dias)','−1 dia'],
+    ['AFS','Atestado / licença médica em SÁBADO, DOMINGO ou FERIADO','Nenhum – o dia não seria de benefício de qualquer forma'],
+    ['FA','Falta abonada','−1 dia'],
+    ['FE','Férias','Nenhum – o sistema do benefício já trata automaticamente'],
+    ['E','Exame periódico / troca de função','Nenhum – estava a serviço da empresa'],
+    ['IN','Afastamento INSS (acima de 15 dias)','Zera o benefício do mês'],
+    [],['FÓRMULA DE CÁLCULO'],
+    ['Dias de benefício = Dias úteis do mês (célula C4 da aba CONTROLE) + Sábados + Domingos + Feriados − Faltas − Atestados em dia útil − Faltas abonadas'],
+    ['Atestado em sábado, domingo ou feriado (AFS) não desconta: o dia não geraria benefício de qualquer forma. Só desconta o atestado que cai em dia útil.'],
+    ['Se houver afastamento INSS no período, o resultado é zerado.'],
+    ['O resultado nunca fica negativo (mínimo zero).'],
+    ['COMO USAR A CADA COMPETÊNCIA'],
+    ['1. Célula C2 – informar o primeiro dia da apuração do ponto (ex.: 16/07/2026). As datas da grade e os dias da semana se atualizam sozinhos.'],
+    ['2. Célula C3 – informar o mês do benefício (ex.: 01/09/2026). Usado apenas nos títulos.'],
+    ['3. Célula C4 – informar MANUALMENTE os dias úteis do mês do benefício, descontando feriados nacionais, estaduais e municipais.'],
+    ['4. Apagar a grade amarela e lançar apenas as ocorrências do novo período — dia útil normal fica em branco.'],
+    ['5. Conferir a aba PENDÊNCIAS antes de fechar.'],
+    ['ABA "VR ADICIONAL 3H"'],
+    ['Colaboradores que realizarem '+hExt+' horas extras ou mais em um mesmo DIA ÚTIL recebem R$ 30,00 adicionais no VR por dia.'],
+    ['Marcar X apenas no dia útil em que a condição foi atingida. Sábados, domingos e dias fora do período ficam bloqueados.'],
+    ['O total de dias por colaborador é somado automaticamente na última coluna.'],
+    [],['PREMISSAS ADOTADAS NO PREENCHIMENTO INICIAL'],
+    ['• Base de dados: espelho de ponto Wponto, período '+c.periodo_inicio.split('-').reverse().join('/')+
+      ' a '+c.periodo_fim.split('-').reverse().join('/')+
+      (benefState.arquivo.emitido?', emitido em '+benefState.arquivo.emitido:'')+'.'],
+    ['• Licenças médicas com mais de 15 dias no período foram classificadas como IN (afastamento INSS).'],
+    ['• Licenças médicas em sábado ou domingo foram classificadas como AFS e não geram desconto.'],
+    ['• Motivos 000023 (exame periódico) e 000030 (exame troca de função) do Wponto foram classificados como E.'],
+    ['• Horas abonadas (motivo 000013 – abono gerencial) não geram desconto, conforme orientação.'],
+    ['• Na aba VR ADICIONAL 3H foram marcados os dias úteis com '+hExt+'h ou mais de hora extra apurados no espelho do período.'],
     [],['ARQUIVO DE ORIGEM'],
-    ['Nome: '+(benefState.arquivo.nome||'')],
-    ['Hash: '+(benefState.arquivo.hash||'')],
-    ['Emitido em: '+(benefState.arquivo.emitido||'')]];
-  var wsL=XLSX.utils.aoa_to_sheet(leg);
-  wsL['!cols']=[{wch:12},{wch:60},{wch:20}];
-  XLSX.utils.book_append_sheet(wb,wsL,'LEGENDA');
-
-  /* ---- Aba 3: PENDÊNCIAS ---- */
-  var pend=[['MATRÍCULA','COLABORADOR','PENDÊNCIA','AÇÃO SUGERIDA']];
-  benefState.pendencias.forEach(function(p){
-    pend.push([p.matricula||'',p.nome||'',p.descricao||'',p.acao_sugerida||'']);
+    ['Nome: '+(benefState.arquivo.nome||'—')],
+    ['Hash SHA-256 (16 primeiros): '+(benefState.arquivo.hash||'—')]];
+  lg.forEach(function(row){ wl.addRow(row); });
+  wl.getColumn(1).width=10; wl.getColumn(2).width=42; wl.getColumn(3).width=52;
+  wl.eachRow(function(row){ row.eachCell(function(cel){ if(!cel.font) cel.font=ARI(10); }); });
+  [1,16,21,27,33,41].forEach(function(r){
+    var cel=wl.getCell('A'+r); if(cel.value) cel.font=ARI(11,true,false,'FF1F4E79');
   });
-  if(pend.length===1) pend.push(['','','Nenhuma pendência detectada.','']);
-  var wsP=XLSX.utils.aoa_to_sheet(pend);
-  wsP['!cols']=[{wch:12},{wch:38},{wch:56},{wch:46}];
-  XLSX.utils.book_append_sheet(wb,wsP,'PENDÊNCIAS');
-
-  /* ---- Aba 4: VR ADICIONAL 3H ---- */
-  var ws4={}; var H4=1;
-  set4(0,0,'VR ADICIONAL – DIAS ÚTEIS COM '+(c.limiar_extra_min/60).toFixed(2).replace('.',',')+'h+ DE HORA EXTRA (R$ 30,00/dia)');
-  function set4(r,cc,v,t){ ws4[XLSX.utils.encode_cell({r:r,c:cc})]= t==='f'?{t:'n',f:v}:{t:t||'s',v:v}; }
-  set4(H4,0,'Matrícula'); set4(H4,1,'Nome do Funcionário');
-  for(var j2=0;j2<NS;j2++){
-    var d2=new Date(ini); d2.setDate(d2.getDate()+j2);
-    var iso2=d2.toISOString().slice(0,10);
-    if(iso2<=c.periodo_fim) set4(H4,2+j2,iso2.slice(8,10)+'/'+iso2.slice(5,7));
+  ['A3','B3','C3'].forEach(function(a){
+    var cel=wl.getCell(a); cel.font=ARI(10,true,false,'FFFFFFFF');
+    cel.fill=HDRF; cel.border=BD; cel.alignment=CT;
+  });
+  for(var lr=4;lr<=14;lr++){
+    ['A','B','C'].forEach(function(x){ var cel=wl.getCell(x+lr); cel.border=BD; cel.font=ARI(10); });
+    wl.getCell('A'+lr).alignment=CT; wl.getCell('A'+lr).font=ARI(10,true);
   }
-  set4(H4,2+NS,'DIAS'); set4(H4,3+NS,'VALOR (R$)');
-  L.forEach(function(l,ri){
-    var r=H4+1+ri;
-    set4(r,0,l.matricula); set4(r,1,l.nome);
-    var ex={}; (l._extras||[]).forEach(function(x){ ex[x]=1; });
-    for(var j3=0;j3<NS;j3++){
-      var d3=new Date(ini); d3.setDate(d3.getDate()+j3);
-      var iso3=d3.toISOString().slice(0,10);
-      if(ex[iso3]) set4(r,2+j3,'X');
-    }
-    set4(r,2+NS,'COUNTIF('+colLetra(2)+(r+1)+':'+colLetra(1+NS)+(r+1)+',"X")','f');
-    set4(r,3+NS,colLetra(2+NS)+(r+1)+'*30','f');
-  });
-  var lr4=H4+L.length+1;
-  set4(lr4,1,'TOTAL');
-  set4(lr4,2+NS,'SUM('+colLetra(2+NS)+(H4+2)+':'+colLetra(2+NS)+(H4+1+L.length)+')','f');
-  set4(lr4,3+NS,'SUM('+colLetra(3+NS)+(H4+2)+':'+colLetra(3+NS)+(H4+1+L.length)+')','f');
-  ws4['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:lr4,c:3+NS}});
-  ws4['!cols']=[{wch:10},{wch:38}].concat(Array(NS).fill({wch:5}),[{wch:8},{wch:12}]);
-  XLSX.utils.book_append_sheet(wb,ws4,'VR ADICIONAL 3H');
 
-  var nm='CONTROLE_BENEFICIOS_'+c.referencia.slice(0,7).replace('-','_')+'.xlsx';
-  XLSX.writeFile(wb,nm);
+  /* ================= ABA 3: PENDÊNCIAS ================= */
+  var wp=wb.addWorksheet('PENDÊNCIAS');
+  wp.addRow(['PENDÊNCIAS'+(benefState.arquivo.emitido?' – conferido contra o espelho emitido em '+benefState.arquivo.emitido:'')]);
+  wp.addRow([]);
+  wp.addRow(['Matrícula','Colaborador','Pendência','Ação sugerida']);
+  benefState.pendencias.forEach(function(p){
+    wp.addRow([p.matricula||'',p.nome||'',p.descricao||'',p.acao_sugerida||'']);
+  });
+  if(!benefState.pendencias.length) wp.addRow(['','','Nenhuma pendência detectada.','']);
+  wp.getColumn(1).width=10; wp.getColumn(2).width=38;
+  wp.getColumn(3).width=64; wp.getColumn(4).width=60;
+  wp.getCell('A1').font=ARI(11,true,false,'FF1F4E79');
+  ['A3','B3','C3','D3'].forEach(function(a){
+    var cel=wp.getCell(a); cel.font=ARI(10,true,false,'FFFFFFFF');
+    cel.fill=HDRF; cel.border=BD; cel.alignment=CT;
+  });
+  for(var pr=4;pr<=wp.rowCount;pr++){
+    ['A','B','C','D'].forEach(function(x){
+      var cel=wp.getCell(x+pr); cel.border=BD; cel.font=ARI(10);
+      cel.alignment={wrapText:true,vertical:'top'};
+    });
+    wp.getCell('A'+pr).alignment={horizontal:'center'};
+  }
+
+  /* ================= ABA 4: VR ADICIONAL 3H ================= */
+  var w4=wb.addWorksheet('VR ADICIONAL 3H',{views:[{state:'frozen',xSplit:3,ySplit:6}]});
+  w4.getCell('A1').value='ADICIONAL DE VR – DIAS COM '+hExt+'H EXTRAS OU MAIS';
+  w4.getCell('A1').font=ARI(12,true);
+  w4.getCell('A2').value={formula:'"Apuração do ponto: "&DAY(CONTROLE!$C$2)&"/"&MONTH(CONTROLE!$C$2)&"/"&YEAR(CONTROLE!$C$2)'+
+    '&" a "&DAY(EDATE(CONTROLE!$C$2,1)-1)&"/"&MONTH(EDATE(CONTROLE!$C$2,1)-1)&"/"&YEAR(EDATE(CONTROLE!$C$2,1)-1)'+
+    '&"   →   Benefício de referência: "&CHOOSE(MONTH(CONTROLE!$C$3),"'+MESES.join('","')+'")&"/"&YEAR(CONTROLE!$C$3)'};
+  w4.getCell('A2').font=ARI(10,false,true);
+  w4.getCell('A3').value='Marque X apenas nos dias ÚTEIS em que o colaborador fez '+hExt+' horas extras ou mais. Sábados, domingos e dias fora do período ficam bloqueados (cinza).';
+  w4.getCell('A3').font=ARI(9,false,true,'FFC00000');
+  w4.getCell('A4').value='Cada dia marcado equivale a R$ 30,00 adicionais no VR (valor conferido fora desta planilha).';
+  w4.getCell('A4').font=ARI(9,false,true);
+
+  ['A','B','C'].forEach(function(L3,i){
+    var cel=w4.getCell(L3+HDR); cel.value=['Matrícula','Nome do Funcionário','Função'][i];
+    cel.font=ARI(10,true,false,'FFFFFFFF'); cel.fill=HDRF; cel.border=BD; cel.alignment=CT;
+  });
+  for(var j4=0;j4<NS;j4++){
+    var c4=C0+j4, L4=CL(c4);
+    var cw4=w4.getCell(L4+(HDR-1));
+    cw4.value={formula:'IF('+L4+HDR+'="","",CHOOSE(WEEKDAY('+L4+HDR+'),"dom","seg","ter","qua","qui","sex","sáb"))'};
+    cw4.font=ARI(8,true); cw4.alignment={horizontal:'center'};
+    var cd4=w4.getCell(L4+HDR);
+    cd4.value={formula:'IF(CONTROLE!$C$2+'+j4+'<=(EDATE(CONTROLE!$C$2,1)-1),CONTROLE!$C$2+'+j4+',"")'};
+    cd4.numFmt='dd/mm'; cd4.font=ARI(8,true,false,'FFFFFFFF'); cd4.fill=HDRF;
+    cd4.border=BD; cd4.alignment={horizontal:'center'};
+  }
+  var celT=w4.getCell(CL(C0+NS)+HDR); celT.value='DIAS COM '+hExt+'H+ EXTRAS';
+  celT.font=ARI(9,true,false,'FFFFFFFF'); celT.fill=HDRF; celT.border=BD;
+  celT.alignment=Object.assign({wrapText:true},CT);
+  w4.getRow(HDR).height=30;
+
+  L.forEach(function(l,ri){
+    var r=R0+ri;
+    var a4=w4.getCell('A'+r); a4.value=l.matricula; a4.font=ARI(10); a4.alignment={horizontal:'center'}; a4.border=BD;
+    var b4=w4.getCell('B'+r); b4.value=l.nome; b4.font=ARI(10); b4.border=BD;
+    var f4=w4.getCell('C'+r); f4.value=l.funcao||''; f4.font=ARI(10); f4.border=BD;
+    var ex={}; (l._extras||[]).forEach(function(x){ ex[x]=1; });
+    for(var j5=0;j5<NS;j5++){
+      var iso=benefAddDias(c.periodo_inicio,j5);
+      var cel=w4.getCell(CL(C0+j5)+r);
+      cel.value=ex[iso]?'X':null;
+      cel.font=ARI(10,true,false,'FF0000FF'); cel.fill=INF; cel.border=BD; cel.alignment=CT;
+    }
+    var t4=w4.getCell(CL(C0+NS)+r);
+    t4.value={formula:'COUNTIF($'+CL(C0)+r+':$'+CL(C0+NS-1)+r+',"X")'};
+    t4.font=ARI(11,true); t4.fill=RESF; t4.border=BD; t4.alignment=CT;
+  });
+  var tl4=w4.getCell('B'+TOTR); tl4.value='TOTAL';
+  tl4.font=ARI(10,true); tl4.fill=TOTF; tl4.border=BD; tl4.alignment={horizontal:'right'};
+  ['A','C'].forEach(function(x){ var cel=w4.getCell(x+TOTR); cel.fill=TOTF; cel.border=BD; });
+  for(var j6=0;j6<NS;j6++){ var cel=w4.getCell(CL(C0+j6)+TOTR); cel.fill=TOTF; cel.border=BD; }
+  var tt4=w4.getCell(CL(C0+NS)+TOTR);
+  tt4.value={formula:'SUM('+CL(C0+NS)+R0+':'+CL(C0+NS)+LAST+')'};
+  tt4.font=ARI(11,true); tt4.fill=RESF; tt4.border=BD; tt4.alignment=CT;
+
+  w4.getColumn(1).width=10; w4.getColumn(2).width=38; w4.getColumn(3).width=26;
+  for(var k4=0;k4<NS;k4++) w4.getColumn(C0+k4).width=4.9;
+  w4.getColumn(C0+NS).width=16;
+  var G4=CL(C0)+R0+':'+CL(C0+NS-1)+LAST;
+  w4.addConditionalFormatting({ref:G4,rules:[{type:'cellIs',operator:'equal',
+    formulae:['"X"'],style:{fill:FILL('FFC6E0B4')}}]});
+  w4.addConditionalFormatting({ref:G4,rules:[{type:'expression',
+    formulae:['OR('+CL(C0)+'$'+HDR+'="",WEEKDAY('+CL(C0)+'$'+HDR+',2)>5)'],
+    style:{fill:FILL('FF808080')}}]});
+
+  /* download */
+  var buf=await wb.xlsx.writeBuffer();
+  var blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  var nm='CONTROLE_BENEFICIOS_'+mesBenef+'_'+c.referencia.slice(0,4)+'.xlsx';
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=nm;
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },1000);
   benefMsg('✓ Planilha gerada: '+nm);
 }
-
 
   start();
 })();
