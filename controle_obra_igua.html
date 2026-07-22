@@ -159,6 +159,9 @@
     padding:11px 18px; border-radius:10px; font-size:.84rem; font-weight:700; box-shadow:0 6px 20px rgba(8,77,57,.3);
     opacity:0; transform:translateY(10px); transition:.25s; pointer-events:none; z-index:50 }
   .saved-flash.show{ opacity:1; transform:translateY(0) }
+  .ver-badge{ position:fixed; bottom:10px; left:12px; font-size:.7rem; color:var(--muted);
+    background:rgba(255,255,255,.82); padding:3px 8px; border-radius:6px;
+    letter-spacing:.02em; pointer-events:none; z-index:40; user-select:none }
   .authbar{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:18px 0 0 }
   .login-form{ display:flex; align-items:center; gap:8px; flex-wrap:wrap }
   .login-form .lock{ font-style:normal }
@@ -397,6 +400,7 @@
     <footer class="ft">Atualizado em <span id="today"></span> &middot; Dados: Efetivo + Previsão de Férias Iguá</footer>
   </div>
   <div class="saved-flash" id="flash">✓ Salvo</div>
+  <div class="ver-badge" id="verBadge">V 2.0</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
