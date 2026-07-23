@@ -360,6 +360,17 @@
               <input type="number" id="benefLimiar" class="benef-in" value="180" min="1" style="min-width:110px">
             </label>
           </div>
+          <div style="margin-bottom:12px">
+            <label style="display:flex;flex-direction:column;gap:4px">
+              <span class="ff-lbl">Feriados do período <b style="color:#c00">*manual*</b> — datas separadas por vírgula (dd/mm)</span>
+              <input type="text" id="benefFeriados" class="benef-in" placeholder="ex.: 03/04, 21/04"
+                     style="max-width:420px">
+            </label>
+            <p class="hint" style="margin:4px 0 0">
+              Feriado em <b>dia útil</b> em que o colaborador trabalhou conta <b>FR</b> (+1 dia).
+              Feriado que cai em sábado/domingo já é contado como S/D — não conta duas vezes.
+            </p>
+          </div>
           <p class="hint" style="margin:0 0 12px">
             <b>Dias úteis é sempre manual</b> — feriados municipais e estaduais do Rio não são
             calculáveis automaticamente. O fim da apuração é sempre o dia 15 do mês seguinte ao início.
@@ -404,7 +415,7 @@
     <footer class="ft">Atualizado em <span id="today"></span> &middot; Dados: Efetivo + Previsão de Férias Iguá</footer>
   </div>
   <div class="saved-flash" id="flash">✓ Salvo</div>
-  <div class="ver-badge" id="verBadge">V 2.1</div>
+  <div class="ver-badge" id="verBadge">V 2.2</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1236,15 +1247,22 @@ async function benefPdfTexto(file){
     var page = await pdf.getPage(i);
     var tc = await page.getTextContent();
     /* reconstrói linhas por coordenada Y, preservando ordem de leitura */
-    var linhas={};
+    /* agrupa por Y com tolerancia: o pdf.js quebra a mesma linha visual
+       em varios Y (ex.: a data fica separada do resto da linha do dia) */
+    var its=[];
     tc.items.forEach(function(it){
-      var y = Math.round(it.transform[5]);
-      if(!linhas[y]) linhas[y]=[];
-      linhas[y].push({x:it.transform[4], s:it.str});
+      if(it.str && it.str.trim()) its.push({y:it.transform[5], x:it.transform[4], s:it.str});
     });
-    Object.keys(linhas).map(Number).sort(function(a,b){return b-a;}).forEach(function(y){
-      var l = linhas[y].sort(function(a,b){return a.x-b.x;}).map(function(o){return o.s;}).join(' ');
-      out += l + '\n';
+    its.sort(function(a,b){ return (b.y-a.y) || (a.x-b.x); });
+    var grupos=[], cur=null;
+    its.forEach(function(it){
+      if(!cur || Math.abs(cur.y-it.y)>2.5){ cur={y:it.y, items:[it]}; grupos.push(cur); }
+      else cur.items.push(it);
+    });
+    grupos.forEach(function(g){
+      out += g.items.sort(function(a,b){return a.x-b.x;})
+                    .map(function(o){return o.s;}).join(' ')
+                    .replace(/\s+/g,' ').trim() + '\n';
     });
   }
   return out;
@@ -1262,18 +1280,32 @@ async function benefHash(file){
 }
 
 /* ---------- classificação de um dia ---------- */
-function benefCodigo(dow, resto, licDias){
+/* Um dia so conta como trabalhado se houver marcacoes de horario reais.
+   Linhas de FOLGA/FERIAS/LICENCA/FALTA/FERIADO nao tem horario de entrada. */
+function benefTrabalhou(resto){
+  var r=(resto||'').toUpperCase();
+  if(/FOLGA|LICEN|FÉRIAS|FERIAS|\* FALTA|FERIADO/.test(r)) return false;
+  var campos=(resto||'').match(/\b\d{1,3}:\d{2}\b/g);
+  if(!campos||campos.length<3) return false;
+  /* ultimo campo = horas trabalhadas; 00:00 significa que nao trabalhou */
+  return campos[campos.length-1]!=='00:00';
+}
+
+function benefCodigo(dow, resto, licDias, ehFeriado){
   var r = (resto||'').toUpperCase();
-  if(r.indexOf('FOLGA')>=0) return '';
+  var fds = (dow==='sáb'||dow==='sab'||dow==='dom');
   if(r.indexOf('LICEN')>=0){
     if(licDias>15) return 'IN';
-    return (dow==='sáb'||dow==='sab'||dow==='dom') ? 'AFS' : 'A';
+    return fds ? 'AFS' : 'A';
   }
   if(r.indexOf('FÉRIAS')>=0 || r.indexOf('FERIAS')>=0) return 'FE';
   if(r.indexOf('* FALTA')>=0) return 'F';
   if(/\b0000(30|23)\b/.test(r)) return 'E';
-  if(dow==='sáb'||dow==='sab') return 'S';
-  if(dow==='dom') return 'D';
+  /* fim de semana trabalhado: S/D tem precedencia sobre FR (evita contagem dupla) */
+  if(fds) return benefTrabalhou(resto) ? (dow==='dom'?'D':'S') : '';
+  /* feriado em dia util: so conta se realmente trabalhou */
+  if(ehFeriado) return benefTrabalhou(resto) ? 'FR' : '';
+  if(r.indexOf('FOLGA')>=0) return '';
   return '';
 }
 
@@ -1325,16 +1357,37 @@ async function benefProcessaPdf(file){
   var noPeriodo = {}, _cur = ini;
   while(_cur <= fim){ noPeriodo[_cur]=true; _cur = benefAddDias(_cur, 1); }
 
+  /* feriados informados manualmente: aceita dd/mm ou dd/mm/aaaa */
+  var feriados={}, fErr=[];
+  ($('benefFeriados').value||'').split(/[,;]+/).forEach(function(tok){
+    tok=tok.trim(); if(!tok) return;
+    var mm=tok.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?$/);
+    if(!mm){ fErr.push(tok); return; }
+    var dd=mm[1].padStart(2,'0'), mo=mm[2].padStart(2,'0');
+    var cands = mm[3] ? [mm[3]+'-'+mo+'-'+dd]
+      : [ini.slice(0,4)+'-'+mo+'-'+dd, fim.slice(0,4)+'-'+mo+'-'+dd];
+    var achou=false;
+    cands.forEach(function(iso){ if(noPeriodo[iso]){ feriados[iso]=true; achou=true; } });
+    if(!achou) fErr.push(tok);
+  });
+  if(fErr.length){
+    benefMsg('Feriado(s) não reconhecido(s) ou fora do período: <b>'+fErr.join(', ')+
+      '</b>. Use dd/mm (ex.: 03/04) dentro de '+ini.split('-').reverse().join('/')+
+      ' a '+fim.split('-').reverse().join('/')+'.',true);
+    return;
+  }
+  var naoLidos=0;
+
   var blocos = txt.split('Relatório de Ponto');
   var linhas=[], vistos={};
   for(var bi=1; bi<blocos.length; bi++){
     var p = blocos[bi];
-    var m = p.match(/Funcion[áa]rio\s+Admiss[ãa]o\s+Fun[çc][ãa]o\s*\n\s*(.+?)\s{2,}(\d{6})\s+(\d{2}\/\d{2}\/\d{4})\s+(.+)/);
-    if(!m){
-      m = p.match(/\n\s*(.+?)\s+(\d{6})\s+(\d{2}\/\d{2}\/\d{4})\s+(.+)/);
-      if(!m) continue;
-    }
+    /* cabecalho: NOME MATRICULA(6) ADMISSAO FUNCAO na mesma linha.
+       Sem fallback frouxo: se nao casar, registra e pula (nao inventa dados). */
+    var m = p.match(/^\s*(.+?)\s+(\d{6})\s+(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s*$/m);
+    if(!m){ naoLidos++; continue; }
     var nome=m[1].trim(), mat=m[2], adm=m[3], func=m[4].trim();
+    if(/Funcion|Admiss|Departamento|CNPJ|Empresa/i.test(nome)){ naoLidos++; continue; }
     var dias=[], re=/^(\d{2}\/\d{2}\/\d{4})\s+(\S{3})\s+(.*)$/gm, mm;
     while((mm=re.exec(p))!==null) dias.push([mm[1],mm[2],mm[3]]);
 
@@ -1347,7 +1400,7 @@ async function benefProcessaPdf(file){
     var ocor=[], extras=[], suspeitos=[];
     dias.forEach(function(x){
       var iso=benefIsoDe(x[0]); if(!noPeriodo[iso]) return;
-      var cod=benefCodigo(x[1], x[2], licDias);
+      var cod=benefCodigo(x[1], x[2], licDias, !!feriados[iso]);
       if(cod) c[cod]++;
       var em=benefExtraMin(x[2]);
       var ehFds = (x[1]==='sáb'||x[1]==='sab'||x[1]==='dom');
@@ -1414,7 +1467,8 @@ async function benefProcessaPdf(file){
   benefState.linhas=linhas; benefState.pendencias=pend;
   benefState.arquivo={nome:file.name, hash:hash, emitido:emitido};
   benefState.comp={referencia:$('benefRef').value+'-01', periodo_inicio:ini,
-    periodo_fim:fim, base_dias_uteis:base, limiar_extra_min:limiar};
+    periodo_fim:fim, base_dias_uteis:base, limiar_extra_min:limiar,
+    feriados:Object.keys(feriados).sort().join(',')};
 
   benefRender();
   var tot = linhas.reduce(function(s,l){ return s+l.dias_beneficio; },0);
@@ -1464,6 +1518,7 @@ async function benefGravar(){
   benefMsg('Gravando...');
   try{
     var comp = Object.assign({}, benefState.comp, {
+      feriados: benefState.comp.feriados || null,
       arquivo_nome: benefState.arquivo.nome,
       arquivo_hash: benefState.arquivo.hash,
       arquivo_emitido: benefState.arquivo.emitido,
@@ -1695,6 +1750,9 @@ async function benefGerarXlsx(){
     ['• Licenças médicas em sábado ou domingo foram classificadas como AFS e não geram desconto.'],
     ['• Motivos 000023 (exame periódico) e 000030 (exame troca de função) do Wponto foram classificados como E.'],
     ['• Horas abonadas (motivo 000013 – abono gerencial) não geram desconto, conforme orientação.'],
+    ['• Feriados informados: '+((c.feriados||'').split(',').filter(Boolean)
+        .map(function(x){return x.split('-').reverse().join('/');}).join(', ')||'nenhum')+
+      '. Feriado em dia útil trabalhado conta FR (+1); em sábado/domingo conta S/D, sem duplicar.'],
     ['• Na aba VR ADICIONAL 3H foram marcados os dias úteis com '+hExt+'h ou mais de hora extra apurados no espelho do período.'],
     [],['ARQUIVO DE ORIGEM'],
     ['Nome: '+(benefState.arquivo.nome||'—')],
