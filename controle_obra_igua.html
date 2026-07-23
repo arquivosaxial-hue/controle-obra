@@ -415,7 +415,7 @@
     <footer class="ft">Atualizado em <span id="today"></span> &middot; Dados: Efetivo + Previsão de Férias Iguá</footer>
   </div>
   <div class="saved-flash" id="flash">✓ Salvo</div>
-  <div class="ver-badge" id="verBadge">V 2.2</div>
+  <div class="ver-badge" id="verBadge">V 2.4</div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1378,6 +1378,13 @@ async function benefProcessaPdf(file){
   }
   var naoLidos=0;
 
+  /* afastados (status do cadastro): o espelho pode mostrar jornada normal com
+     abono gerencial, mas o RH nao paga beneficio. Zera e registra pendencia. */
+  var afastados={};
+  (typeof rows!=='undefined' ? rows : []).forEach(function(r){
+    if(isAfastado(r) && r.codigo) afastados[String(r.codigo).padStart(6,'0')]=r.nome||'';
+  });
+
   var blocos = txt.split('Relatório de Ponto');
   var linhas=[], vistos={};
   for(var bi=1; bi<blocos.length; bi++){
@@ -1409,9 +1416,10 @@ async function benefProcessaPdf(file){
       ocor.push({data:iso, codigo:cod||null, extra_minutos:em});
     });
 
-    var dias_beneficio;
-    if(c.IN>0) dias_beneficio = 0;
+    var dias_beneficio, ehAfast = !!afastados[mat];
+    if(c.IN>0 || ehAfast) dias_beneficio = 0;
     else dias_beneficio = Math.max(0, base + c.S + c.D + c.FR - c.F - c.A - c.FA);
+    if(ehAfast && c.IN===0){ c.IN = ocor.filter(function(o){return o.codigo;}).length || 1; }
 
     if(vistos[mat]) continue;
     vistos[mat]=true;
@@ -1434,13 +1442,18 @@ async function benefProcessaPdf(file){
   linhas.forEach(function(l){
     if(!porMat[l.matricula]){
       pend.push({matricula:l.matricula, nome:l.nome, tipo:'SEM_CADASTRO',
-        descricao:'Consta no espelho de ponto mas não tem cadastro ativo no efetivo.',
-        acao_sugerida:'Verificar se a contratação foi registrada no sistema.'});
+        descricao:'Consta no espelho de ponto e foi incluído normalmente na apuração, mas não tem cadastro ativo no efetivo.',
+        acao_sugerida:'Conferir se falta cadastrar no app ou se já foi desligado depois deste período.'});
     }
     if(l.admissao && l.admissao>=ini && l.admissao<=fim){
       pend.push({matricula:l.matricula, nome:l.nome, tipo:'ADMISSAO_PARCIAL',
         descricao:'Admitido em '+l.admissao.split('-').reverse().join('/')+', dentro do período de apuração.',
         acao_sugerida:'Conferir se os dias devem ser proporcionais.'});
+    }
+    if(afastados[l.matricula]){
+      pend.push({matricula:l.matricula, nome:l.nome, tipo:'ERRO_PONTO',
+        descricao:'Marcado como AFASTADO no cadastro — benefício zerado, mesmo com jornada lançada no espelho.',
+        acao_sugerida:'Se já retornou, alterar a Situação para Ativo na aba Todos os colaboradores.'});
     }
     (l._suspeitos||[]).forEach(function(s){
       pend.push({matricula:l.matricula, nome:l.nome, tipo:'ERRO_PONTO',
@@ -1452,13 +1465,16 @@ async function benefProcessaPdf(file){
   ativos.forEach(function(r){
     var mat = r.codigo ? String(r.codigo).padStart(6,'0') : null;
     if(mat && !vistos[mat]){
+      /* sem espelho no periodo = nao estava no contrato na epoca.
+         Entra na planilha com 0 dias (visivel que foi conferido), nunca com a base. */
       linhas.push({matricula:mat, nome:r.nome||'', funcao:r.funcao||'', admissao:null,
         sabados:0,domingos:0,feriados:0,faltas:0,atestados:0,atestados_fds:0,
         faltas_abonadas:0,ferias:0,exames:0,inss:0,
-        dias_beneficio:base, dias_extra_3h:0, _ocor:[], _extras:[], _suspeitos:[]});
+        dias_beneficio:0, dias_extra_3h:0, semEspelho:true,
+        _ocor:[], _extras:[], _suspeitos:[]});
       pend.push({matricula:mat, nome:r.nome||'', tipo:'SEM_ESPELHO',
-        descricao:'Ativo no efetivo mas sem espelho de ponto no arquivo.',
-        acao_sugerida:'Confirmar se foi esquecido na apuração ou se foi desligado.'});
+        descricao:'Sem espelho de ponto neste período — lançado com 0 dias.',
+        acao_sugerida:'Normal se foi admitido depois. Se deveria constar, pedir o espelho ao DP e reimportar.'});
     }
   });
 
@@ -1650,8 +1666,10 @@ async function benefGerarXlsx(){
   L.forEach(function(l,ri){
     var r=R0+ri;
     var a=ws.getCell('A'+r); a.value=l.matricula; a.font=ARI(10); a.alignment={horizontal:'center'}; a.border=BD;
-    var b=ws.getCell('B'+r); b.value=l.nome; b.font=ARI(10); b.border=BD;
-    var f=ws.getCell('C'+r); f.value=l.funcao||''; f.font=ARI(10); f.border=BD;
+    var b=ws.getCell('B'+r); b.value=l.nome;
+    b.font=ARI(10,false,!!l.semEspelho,l.semEspelho?'FF808080':'FF000000'); b.border=BD;
+    var f=ws.getCell('C'+r); f.value=l.funcao||'';
+    f.font=ARI(10,false,!!l.semEspelho,l.semEspelho?'FF808080':'FF000000'); f.border=BD;
     var mapa={}; (l._ocor||[]).forEach(function(o){ if(o.codigo) mapa[o.data]=o.codigo; });
     for(var j2=0;j2<NS;j2++){
       var iso=benefAddDias(c.periodo_inicio,j2);
@@ -1674,7 +1692,14 @@ async function benefGerarXlsx(){
     }
     soma(3,0,1,2); soma(7,4,5,6);
     var res=ws.getCell(CL(C0+NS+12)+r);
-    res.value={formula:'IF('+CL(C0+NS+11)+r+'>0,0,MAX(0,$C$4+'+CL(C0+NS+3)+r+'-'+CL(C0+NS+7)+r+'))'};
+    if(l.semEspelho){
+      /* valor fixo: a formula MAX(0,$C$4+...) recalcularia para a base cheia,
+         desfazendo o zero de quem nao tinha espelho no periodo */
+      res.value=0;
+      res.note='Sem espelho de ponto neste período — não estava no contrato na época.';
+    } else {
+      res.value={formula:'IF('+CL(C0+NS+11)+r+'>0,0,MAX(0,$C$4+'+CL(C0+NS+3)+r+'-'+CL(C0+NS+7)+r+'))'};
+    }
     res.font=ARI(11,true); res.fill=RESF; res.border=BD; res.alignment=CT;
   });
 
@@ -1750,6 +1775,7 @@ async function benefGerarXlsx(){
     ['• Licenças médicas em sábado ou domingo foram classificadas como AFS e não geram desconto.'],
     ['• Motivos 000023 (exame periódico) e 000030 (exame troca de função) do Wponto foram classificados como E.'],
     ['• Horas abonadas (motivo 000013 – abono gerencial) não geram desconto, conforme orientação.'],
+    ['• Colaboradores com situação AFASTADO no cadastro têm o benefício zerado, independentemente do que consta no espelho de ponto.'],
     ['• Feriados informados: '+((c.feriados||'').split(',').filter(Boolean)
         .map(function(x){return x.split('-').reverse().join('/');}).join(', ')||'nenhum')+
       '. Feriado em dia útil trabalhado conta FR (+1); em sábado/domingo conta S/D, sem duplicar.'],
