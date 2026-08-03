@@ -183,6 +183,12 @@
     border-radius:7px; background:#fff; color:inherit }
   .benef-in:focus{ outline:none; border-color:var(--axial); box-shadow:0 0 0 2px rgba(8,77,57,.12) }
   .benef-in[readonly]{ background:#f1f5f9; color:#475569; cursor:default }
+  .benef-prog{ margin-top:12px }
+  .benef-prog-bar{ height:8px; background:#e2e8f0; border-radius:999px; overflow:hidden }
+  .benef-prog-fill{ height:100%; width:0%; background:var(--axial);
+    border-radius:999px; transition:width .18s ease }
+  .benef-prog-txt{ display:flex; justify-content:space-between; gap:10px;
+    font-size:.78rem; color:var(--muted); margin-top:6px }
 </style>
 
 <div id="dts-root">
@@ -381,6 +387,13 @@
             <button class="btn btn-ghost" id="benefSaveBtn" disabled>☁ Gravar competência</button>
             <button class="btn btn-ghost" id="benefXlsxBtn" disabled>⬇ Baixar .xlsx (4 abas)</button>
           </div>
+          <div id="benefProg" class="benef-prog" style="display:none">
+            <div class="benef-prog-bar"><div class="benef-prog-fill" id="benefProgFill"></div></div>
+            <div class="benef-prog-txt">
+              <span id="benefProgLbl">Lendo o documento...</span>
+              <span id="benefProgPct">0%</span>
+            </div>
+          </div>
           <div id="benefMsg" class="importmsg" style="display:none;margin-top:12px"></div>
         </div>
       </div>
@@ -415,7 +428,7 @@
     <footer class="ft">Atualizado em <span id="today"></span> &middot; Dados: Efetivo + Previsão de Férias Iguá</footer>
   </div>
   <div class="saved-flash" id="flash">✓ Salvo</div>
-  <div class="ver-badge" id="verBadge">V 2.4</div>
+  <div class="ver-badge" id="verBadge"></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -424,6 +437,10 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js"></script>
 <script>
+/* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
+var APP_VERSION = '2.6';
+var APP_BUILD   = '2026-07-23';
+
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
    Você edita config.js UMA vez; ao trocar este HTML por uma versão nova,
    não precisa mexer nas chaves. Fallback abaixo só evita erro se o arquivo faltar. */
@@ -1192,6 +1209,27 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
    ===================================================================== */
 var benefState = { linhas:[], pendencias:[], comp:null, arquivo:null, inited:false };
 
+/* barra de progresso: percentual real, medido nas etapas da importacao.
+   benefTick cede o controle ao navegador para a barra realmente repintar. */
+function benefProg(pct, lbl){
+  var box=$('benefProg'); if(!box) return;
+  box.style.display='';
+  if(pct!=null){
+    pct=Math.max(0,Math.min(100,Math.round(pct)));
+    $('benefProgFill').style.width=pct+'%';
+    $('benefProgPct').textContent=pct+'%';
+  }
+  if(lbl) $('benefProgLbl').textContent=lbl;
+}
+function benefProgFim(){
+  var box=$('benefProg'); if(!box) return;
+  $('benefProgFill').style.width='100%'; $('benefProgPct').textContent='100%';
+  setTimeout(function(){ box.style.display='none'; $('benefProgFill').style.width='0%'; },450);
+}
+function benefTick(){
+  return new Promise(function(r){ setTimeout(r,0); });
+}
+
 function benefMsg(t, err){
   var el=$('benefMsg'); if(!el) return;
   el.style.display=''; el.innerHTML=t;
@@ -1239,13 +1277,17 @@ function benefInit(){
 }
 
 /* ---------- extração de texto do PDF ---------- */
-async function benefPdfTexto(file){
+async function benefPdfTexto(file, onProg){
   var buf = await file.arrayBuffer();
   var pdf = await pdfjsLib.getDocument({data:buf}).promise;
-  var out='';
-  for(var i=1;i<=pdf.numPages;i++){
+  var out='', N=pdf.numPages;
+  for(var i=1;i<=N;i++){
     var page = await pdf.getPage(i);
     var tc = await page.getTextContent();
+    if(onProg && (i%2===0 || i===N)){
+      onProg(i, N);
+      await benefTick();
+    }
     /* reconstrói linhas por coordenada Y, preservando ordem de leitura */
     /* agrupa por Y com tolerancia: o pdf.js quebra a mesma linha visual
        em varios Y (ex.: a data fica separada do resto da linha do dia) */
@@ -1337,7 +1379,9 @@ function benefAddDias(iso, n){
 }
 
 /* ---------- processamento principal ---------- */
+var benefProcessando = false;
 async function benefProcessaPdf(file){
+  if(benefProcessando) return;
   benefSyncDatas();
   var ini=$('benefIni').value, fim=$('benefFim').value, base=+$('benefBase').value;
   if(!ini){ benefMsg('Informe o <b>início da apuração</b> (dia 16 do mês).',true); return; }
@@ -1345,12 +1389,28 @@ async function benefProcessaPdf(file){
   if(!base || base<1){ benefMsg('Informe os <b>dias úteis do mês</b> (preenchimento manual obrigatório).',true); return; }
   var limiar = +$('benefLimiar').value || 180;
 
+  benefProcessando = true;
+  var btnP=$('benefPdfBtn'), txtP=btnP?btnP.textContent:'';
+  if(btnP){ btnP.disabled=true; btnP.textContent='Lendo o PDF...'; }
+  function fimProc(){
+    benefProcessando=false;
+    if(btnP){ btnP.disabled=false; btnP.textContent=txtP||'⬆ Anexar espelho de ponto (PDF)'; }
+  }
   benefMsg('Lendo o PDF...');
+  benefProg(0,'Abrindo o documento...');
+  await benefTick();
   var txt, hash;
   try{
-    txt = await benefPdfTexto(file);
+    txt = await benefPdfTexto(file, function(i,n){
+      benefProg(i/n*70, 'Lendo página '+i+' de '+n+'...');
+    });
+    benefProg(72,'Calculando identificação do arquivo...');
+    await benefTick();
     hash = await benefHash(file);
-  }catch(e){ benefMsg('Falha ao ler o PDF: '+e.message,true); return; }
+  }catch(e){
+    benefMsg('Falha ao ler o PDF: '+e.message,true);
+    benefProgFim(); fimProc(); return;
+  }
 
   var emitido = (txt.match(/(\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2})/)||[])[1] || null;
 
@@ -1374,6 +1434,7 @@ async function benefProcessaPdf(file){
     benefMsg('Feriado(s) não reconhecido(s) ou fora do período: <b>'+fErr.join(', ')+
       '</b>. Use dd/mm (ex.: 03/04) dentro de '+ini.split('-').reverse().join('/')+
       ' a '+fim.split('-').reverse().join('/')+'.',true);
+    benefProgFim(); fimProc();
     return;
   }
   var naoLidos=0;
@@ -1387,7 +1448,13 @@ async function benefProcessaPdf(file){
 
   var blocos = txt.split('Relatório de Ponto');
   var linhas=[], vistos={};
+  benefProg(75,'Interpretando os registros de ponto...');
+  await benefTick();
   for(var bi=1; bi<blocos.length; bi++){
+    if(bi%10===0){
+      benefProg(75+(bi/blocos.length)*17,'Interpretando registros ('+bi+'/'+(blocos.length-1)+')...');
+      await benefTick();
+    }
     var p = blocos[bi];
     /* cabecalho: NOME MATRICULA(6) ADMISSAO FUNCAO na mesma linha.
        Sem fallback frouxo: se nao casar, registra e pula (nao inventa dados). */
@@ -1430,9 +1497,14 @@ async function benefProcessaPdf(file){
       _ocor:ocor, _extras:extras, _suspeitos:suspeitos});
   }
 
-  if(!linhas.length){ benefMsg('Nenhum bloco de colaborador reconhecido no PDF.',true); return; }
+  if(!linhas.length){
+    benefMsg('Nenhum bloco de colaborador reconhecido no PDF.',true);
+    benefProgFim(); fimProc(); return;
+  }
 
   /* ----- cruzamento com o efetivo ----- */
+  benefProg(93,'Cruzando com o cadastro de colaboradores...');
+  await benefTick();
   var pend=[];
   var ativos = (typeof rows!=='undefined' ? rows : []).filter(function(r){
     return !isDesligado(r);
@@ -1486,13 +1558,17 @@ async function benefProcessaPdf(file){
     periodo_fim:fim, base_dias_uteis:base, limiar_extra_min:limiar,
     feriados:Object.keys(feriados).sort().join(',')};
 
+  benefProg(98,'Montando a tabela...');
+  await benefTick();
   benefRender();
+  benefProgFim();
   var tot = linhas.reduce(function(s,l){ return s+l.dias_beneficio; },0);
   var tot3h = linhas.reduce(function(s,l){ return s+l.dias_extra_3h; },0);
   benefMsg('<b>'+linhas.length+' colaboradores</b> · total <b>'+tot+' dias</b> de benefício · '+
     tot3h+' dia(s) com 3h+ extra (R$ '+(tot3h*30)+',00 adicionais) · '+
     pend.length+' pendência(s).');
   $('benefSaveBtn').disabled=false; $('benefXlsxBtn').disabled=false;
+  fimProc();
 }
 
 function benefRender(){
@@ -1528,9 +1604,34 @@ function benefRender(){
 }
 
 /* ---------- gravação no Supabase ---------- */
+/* trava de reentrada: o ciclo faz upsert + delete + insert em 4 tabelas.
+   Dois cliques concorrentes podem fazer o delete do 2o apagar o insert do 1o. */
+var benefGravando = false;
+
 async function benefGravar(){
+  if(benefGravando) return;
   if(!sb || !canEdit()){ benefMsg('Faça login para gravar.',true); return; }
   if(!benefState.comp){ benefMsg('Processe um espelho antes de gravar.',true); return; }
+
+  /* competencia ja gravada? confirmar antes de sobrescrever */
+  var btn=$('benefSaveBtn'), txtOrig=btn?btn.textContent:'';
+  try{
+    var jaTem = await sb.from('beneficio_competencia')
+      .select('id,arquivo_nome,criado_em,criado_por')
+      .eq('referencia', benefState.comp.referencia).maybeSingle();
+    if(jaTem.data){
+      var q = jaTem.data.criado_em ? new Date(jaTem.data.criado_em).toLocaleString('pt-BR') : 'data desconhecida';
+      var msg = 'Já existe uma apuração gravada para '+
+        benefState.comp.referencia.slice(0,7).split('-').reverse().join('/')+'.\n\n'+
+        'Arquivo: '+(jaTem.data.arquivo_nome||'—')+'\n'+
+        'Gravada em: '+q+(jaTem.data.criado_por?' por '+jaTem.data.criado_por:'')+'\n\n'+
+        'Regravar APAGA os dados anteriores e não há como desfazer.\n\nContinuar?';
+      if(!confirm(msg)){ benefMsg('Gravação cancelada — os dados anteriores foram mantidos.'); return; }
+    }
+  }catch(e){ /* se a checagem falhar, segue o fluxo normal */ }
+
+  benefGravando = true;
+  if(btn){ btn.disabled=true; btn.textContent='Gravando...'; }
   benefMsg('Gravando...');
   try{
     var comp = Object.assign({}, benefState.comp, {
@@ -1582,15 +1683,29 @@ async function benefGravar(){
       ' · '+benefState.linhas.length+' colaboradores · arquivo '+benefState.arquivo.nome);
     benefMsg('✓ Competência gravada na nuvem ('+benefState.linhas.length+' linhas, '+ocs.length+' ocorrências).');
     showFlash();
-  }catch(e){ benefMsg('Erro ao gravar: '+(e.message||e),true); }
+  }catch(e){
+    benefMsg('Erro ao gravar: '+(e.message||e),true);
+  }finally{
+    benefGravando=false;
+    if(btn){ btn.disabled=false; btn.textContent=txtOrig||'☁ Gravar competência'; }
+  }
 }
 
 /* Gera o .xlsx com ExcelJS (SheetJS community nao escreve estilos).
    Replica CONTROLE_BENEFICIOS_AGOSTO_2026.xlsx: cores, Arial, dropdown,
    formatacao condicional por codigo, freeze panes e formulas. */
+var benefGerando = false;
 async function benefGerarXlsx(){
+  if(benefGerando) return;
   if(!benefState.linhas.length){ benefMsg('Nada para exportar.',true); return; }
-  if(typeof ExcelJS==='undefined'){ benefMsg('A biblioteca ExcelJS não carregou. Recarregue a página.',true); return; }
+  if(typeof ExcelJS==='undefined'){
+    benefMsg('A biblioteca ExcelJS não carregou. Recarregue a página (Ctrl+Shift+R).',true); return;
+  }
+  benefGerando=true;
+  var btnX=$('benefXlsxBtn'), txtX=btnX?btnX.textContent:'';
+  if(btnX){ btnX.disabled=true; btnX.textContent='Gerando...'; }
+  benefProg(5,'Montando as 4 abas da planilha...');
+  await benefTick();
   var c=benefState.comp, L=benefState.linhas;
   var NS=31, C0=4, HDR=6, R0=7;                 /* grade D(4)..AH ; cabecalho L6 ; dados L7 */
   var nLin=L.length, LAST=R0+nLin-1, TOTR=LAST+1;
@@ -1610,6 +1725,8 @@ async function benefGerarXlsx(){
 
   var wb=new ExcelJS.Workbook();
   wb.creator='Controle de Obra Iguá'; wb.created=new Date();
+  benefProg(15,'Montando a aba CONTROLE...');
+  await benefTick();
 
   /* ================= ABA 1: CONTROLE ================= */
   var ws=wb.addWorksheet('CONTROLE',{views:[{state:'frozen',xSplit:3,ySplit:6}]});
@@ -1739,6 +1856,8 @@ async function benefGerarXlsx(){
       formulae:['AND('+CL(C0)+'$'+HDR+'<>"",WEEKDAY('+CL(C0)+'$'+HDR+',2)>5)'],
       style:{fill:FILL('FFFCE4D6')}}]});
 
+  benefProg(60,'Montando LEGENDA e PENDÊNCIAS...');
+  await benefTick();
   /* ================= ABA 2: LEGENDA ================= */
   var wl=wb.addWorksheet('LEGENDA');
   var lg=[['LEGENDA DE CÓDIGOS'],[],
@@ -1822,6 +1941,8 @@ async function benefGerarXlsx(){
     wp.getCell('A'+pr).alignment={horizontal:'center'};
   }
 
+  benefProg(75,'Montando VR ADICIONAL 3H...');
+  await benefTick();
   /* ================= ABA 4: VR ADICIONAL 3H ================= */
   var w4=wb.addWorksheet('VR ADICIONAL 3H',{views:[{state:'frozen',xSplit:3,ySplit:6}]});
   w4.getCell('A1').value='ADICIONAL DE VR – DIAS COM '+hExt+'H EXTRAS OU MAIS';
@@ -1889,7 +2010,17 @@ async function benefGerarXlsx(){
     style:{fill:FILL('FF808080')}}]});
 
   /* download */
-  var buf=await wb.xlsx.writeBuffer();
+  benefProg(90,'Gravando o arquivo...');
+  await benefTick();
+  var buf;
+  try{ buf=await wb.xlsx.writeBuffer(); }
+  catch(e){
+    benefGerando=false; benefProgFim();
+    if(btnX){ btnX.disabled=false; btnX.textContent=txtX||'⬇ Baixar .xlsx (4 abas)'; }
+    benefMsg('Falha ao gerar a planilha: '+(e.message||e),true); return;
+  }
+  benefGerando=false; benefProgFim();
+  if(btnX){ btnX.disabled=false; btnX.textContent=txtX||'⬇ Baixar .xlsx (4 abas)'; }
   var blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   var nm='CONTROLE_BENEFICIOS_'+mesBenef+'_'+c.referencia.slice(0,4)+'.xlsx';
   var a=document.createElement('a');
@@ -1898,6 +2029,12 @@ async function benefGerarXlsx(){
   setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },1000);
   benefMsg('✓ Planilha gerada: '+nm);
 }
+
+  /* selo de versao: lido da constante unica, nunca escrito a mao no HTML */
+  (function(){
+    var vb=document.getElementById('verBadge');
+    if(vb){ vb.textContent='V '+APP_VERSION; vb.title='Build '+APP_BUILD; }
+  })();
 
   start();
 })();
