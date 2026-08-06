@@ -1,27 +1,108 @@
 name: Supabase Keep-Alive
 
 # Mantém o projeto Supabase ativo no plano gratuito.
-# Roda automaticamente a cada 3 dias (e pode ser disparado manualmente).
+# Roda a cada 2 dias (o plano free pausa após ~7 dias sem atividade).
+#
+# Por que 2 dias e não 3: o cron "*/3" no campo de dia-do-mês reinicia a
+# contagem a cada mês, criando intervalos irregulares na virada (dia 31 e
+# dia 1 podem cair em dias seguidos, e o fim do mês fica com buracos maiores).
+# Com */2 a margem fica confortável em qualquer mês.
 on:
   schedule:
-    - cron: '0 12 */3 * *'   # a cada 3 dias, 12:00 UTC (09:00 no horário de Brasília)
-  workflow_dispatch:          # permite rodar manualmente pelo botão "Run workflow"
+    - cron: '0 12 */2 * *'    # a cada 2 dias, 12:00 UTC (09:00 Brasília)
+  workflow_dispatch:
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Consultar Supabase (mantém ativo)
+      - name: Conferir se as secrets existem
         run: |
-          echo "Enviando requisicao ao Supabase em $(date)"
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            "${{ secrets.SUPABASE_URL }}/rest/v1/colaboradores?select=id&limit=1" \
-            -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}")
-          echo "Codigo HTTP recebido: $HTTP_CODE"
-          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 400 ]; then
-            echo "Sucesso: projeto respondeu e foi mantido ativo."
-          else
-            echo "Atencao: resposta inesperada (HTTP $HTTP_CODE)."
+          FALTA=0
+          if [ -z "${{ secrets.SUPABASE_URL }}" ]; then
+            echo "ERRO: a secret SUPABASE_URL nao esta definida."
+            FALTA=1
+          fi
+          if [ -z "${{ secrets.SUPABASE_KEY }}" ]; then
+            echo "ERRO: a secret SUPABASE_KEY nao esta definida."
+            FALTA=1
+          fi
+          if [ "$FALTA" = "1" ]; then
+            echo ""
+            echo "Defina em: Settings > Secrets and variables > Actions"
             exit 1
           fi
+          echo "Secrets presentes."
+
+      - name: Consultar Supabase (com repeticao)
+        id: ping
+        run: |
+          URL="${{ secrets.SUPABASE_URL }}/rest/v1/colaboradores?select=id&limit=1"
+          CODE=""
+          # 3 tentativas com intervalo: um projeto saindo da pausa demora a responder
+          for TENTATIVA in 1 2 3; do
+            echo "Tentativa $TENTATIVA em $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            CODE=$(curl -s -o /tmp/resp.txt -w "%{http_code}" --max-time 30 \
+              "$URL" \
+              -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+              -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" || echo "000")
+            echo "  HTTP $CODE"
+            if [ "$CODE" -ge 200 ] 2>/dev/null && [ "$CODE" -lt 400 ] 2>/dev/null; then
+              echo "  Leitura OK."
+              # Escrita: um SELECT pode ser servido sem tocar o banco, entao
+              # gravamos de fato. Se a funcao nao existir, apenas avisa.
+              W=$(curl -s -o /tmp/w.txt -w "%{http_code}" --max-time 30 -X POST \
+                "${{ secrets.SUPABASE_URL }}/rest/v1/rpc/ping_keepalive" \
+                -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+                -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" \
+                -H "Content-Type: application/json" -d '{}' || echo "000")
+              if [ "$W" -ge 200 ] 2>/dev/null && [ "$W" -lt 300 ] 2>/dev/null; then
+                echo "  Escrita OK — $(cat /tmp/w.txt)"
+              else
+                echo "  Aviso: escrita nao executada (HTTP $W)."
+                echo "  Rode keepalive_tabela.sql no SQL Editor para ativar."
+              fi
+              echo "Projeto ativo."
+              echo "codigo=$CODE" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            [ "$TENTATIVA" -lt 3 ] && sleep 45
+          done
+
+          # Falhou nas 3 tentativas: explica o que cada codigo significa
+          echo ""
+          echo "======================================================"
+          echo "FALHA — o projeto nao respondeu. Codigo final: $CODE"
+          echo "======================================================"
+          case "$CODE" in
+            000) echo "Sem resposta: rede, DNS ou URL invalida na secret." ;;
+            401|403) echo "Chave rejeitada. A SUPABASE_KEY provavelmente foi rotacionada."
+                     echo "Pegue a nova em: Supabase > Project Settings > API" ;;
+            404) echo "Caminho nao encontrado. Conferir a URL e se a tabela 'colaboradores' existe." ;;
+            503|544|540) echo "PROJETO PAUSADO ou indisponivel."
+                         echo "Restaurar em: supabase.com/dashboard > Restore project"
+                         echo ""
+                         echo "ATENCAO: se este erro aparecer mesmo com os pings"
+                         echo "anteriores verdes, o ping REST nao esta sendo contado"
+                         echo "como atividade pelo Supabase. Nesse caso o keep-alive"
+                         echo "nao resolve e o plano pago e a unica saida confiavel." ;;
+            *) echo "Resposta inesperada. Corpo recebido:" ; head -c 400 /tmp/resp.txt ;;
+          esac
+          exit 1
+
+      - name: Resumo no painel do Actions
+        if: always()
+        run: |
+          {
+            echo "### Keep-Alive do Supabase"
+            echo ""
+            if [ "${{ job.status }}" = "success" ]; then
+              echo "Projeto ativo — HTTP ${{ steps.ping.outputs.codigo }}"
+            else
+              echo "**FALHOU.** Abra o passo \"Consultar Supabase\" para ver o motivo."
+              echo ""
+              echo "Se o projeto estiver pausado: supabase.com/dashboard > Restore project"
+            fi
+            echo ""
+            echo "Verificado em $(date -u '+%d/%m/%Y %H:%M UTC')"
+          } >> "$GITHUB_STEP_SUMMARY"
