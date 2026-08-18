@@ -251,6 +251,7 @@
       <button class="tab" data-tab="resumo">Resumo</button>
       <button class="tab" data-tab="beneficios">Benefícios (VR/VA)</button>
       <button class="tab" data-tab="historico">Histórico</button>
+      <button class="tab" id="tabUsuarios" data-tab="usuarios" style="display:none">Usuários</button>
     </div>
 
     <div id="view-todos">
@@ -448,6 +449,63 @@
       <p class="hint">Registro das alterações feitas na nuvem (quem, o quê e quando). Mostra os 200 eventos mais recentes.</p>
     </div>
 
+    <div id="view-usuarios" style="display:none">
+      <div style="padding:11px 13px;background:#eff6ff;border:1px solid #93c5fd;
+           border-radius:7px;margin-bottom:14px;font-size:.86rem">
+        <b>Quem pode fazer o quê</b>
+        <div style="margin-top:6px">
+          <b>Leitor</b> — vê tudo, inclusive benefícios. Não altera nada.<br>
+          <b>Importador</b> — tudo do leitor, mais importar espelho, gravar competência e editar o efetivo.<br>
+          <b>Administrador</b> — tudo do importador, mais esta aba.
+        </div>
+        <div style="margin-top:6px;color:var(--muted)">
+          A pessoa recebe um convite por e-mail e cria a própria senha. Você nunca vê nem digita
+          a senha dela. Tirar o acesso vale na hora, na próxima chamada ao servidor.
+        </div>
+      </div>
+
+      <div class="card" style="padding:14px;margin-bottom:14px">
+        <b>Convidar pessoa</b>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:10px">
+          <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:220px">
+            <span class="ff-lbl">E-mail</span>
+            <input type="email" id="usrEmail" class="benef-in" placeholder="nome@construtoraaxial.com.br">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;min-width:150px">
+            <span class="ff-lbl">Nome (opcional)</span>
+            <input type="text" id="usrNome" class="benef-in">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;min-width:150px">
+            <span class="ff-lbl">Papel</span>
+            <select id="usrPapel" class="benef-in">
+              <option value="leitor">Leitor</option>
+              <option value="importador" selected>Importador</option>
+              <option value="admin">Administrador</option>
+            </select>
+          </label>
+          <button class="btn" id="usrConvidar">✉ Enviar convite</button>
+        </div>
+      </div>
+
+      <div id="usrMsg" style="display:none;padding:10px 12px;border-radius:6px;
+           border:1px solid;margin-bottom:14px;font-size:.88rem"></div>
+
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>E-mail</th><th>Nome</th><th>Papel</th><th>Situação</th>
+            <th>Convite</th><th>Último acesso</th><th>Ações</th>
+          </tr></thead>
+          <tbody id="usrTbody"></tbody>
+        </table>
+      </div>
+      <p class="hint">
+        A lista vem do servidor a cada abertura desta aba. Se alguém aparecer como
+        <i>convite pendente</i>, a pessoa ainda não clicou no link do e-mail e por isso
+        ainda não consegue entrar.
+      </p>
+    </div>
+
     <footer class="ft">Atualizado em <span id="today"></span> &middot; Dados: Efetivo + Previsão de Férias Iguá</footer>
   </div>
   <div class="saved-flash" id="flash">✓ Salvo</div>
@@ -461,7 +519,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '2.9';
+var APP_VERSION = '3.0';
 var APP_BUILD   = '2026-07-23';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -483,7 +541,31 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
   $('today').textContent=today.toLocaleDateString('pt-BR');
 
   function uid(){ return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'c'+Math.random().toString(36).slice(2,11)+Date.now().toString(36); }
-  function canEdit(){ return !!session; }
+
+  /* ---------- papéis de acesso ----------
+     'admin' | 'importador' | 'leitor' | null (logado sem permissão).
+     Isto aqui e' so' a aparencia da tela. Quem realmente barra e' a RLS
+     do Supabase: o config.js e' publico e qualquer um pode chamar a API
+     por fora do app. Esconder botao nao protege nada sozinho. */
+  let meuPapel = null;
+  const PAPEL_NOME = {admin:'Administrador', importador:'Importador', leitor:'Leitor'};
+
+  function canEdit(){ return !!session && (meuPapel==='admin' || meuPapel==='importador'); }
+  function isAdmin(){ return !!session && meuPapel==='admin'; }
+  function podeVerBeneficios(){ return !!session && !!meuPapel; }
+
+  async function carregaPapel(){
+    meuPapel = null;
+    if(!sb || !session || !session.user || !session.user.email) return;
+    try{
+      const { data } = await sb.from('perfis')
+        .select('papel,ativo')
+        .eq('email', String(session.user.email).toLowerCase())
+        .maybeSingle();
+      if(data && data.ativo) meuPapel = data.papel;
+    }catch(e){ meuPapel = null; }
+  }
+
   function parseDate(s){ if(!s) return null; const p=String(s).split('-'); if(p.length<3) return null; const d=new Date(+p[0],+p[1]-1,+p[2]); d.setHours(0,0,0,0); return isNaN(d)?null:d; }
   function fmtDate(s){ const d=parseDate(s); return d? d.toLocaleDateString('pt-BR'):'—'; }
   function fmtDiaSemana(s){ const d=parseDate(s); if(!d) return ''; const dia=d.toLocaleDateString('pt-BR',{weekday:'long'}); return dia.charAt(0).toUpperCase()+dia.slice(1)+', '+d.toLocaleDateString('pt-BR'); }
@@ -848,11 +930,12 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     t.addEventListener('click',()=>{
       document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
       t.classList.add('active'); tab=t.dataset.tab;
-      ['todos','ferias','exames','financeiro','resumo','beneficios','historico'].forEach(v=>{
+      ['todos','ferias','exames','financeiro','resumo','beneficios','historico','usuarios'].forEach(v=>{
         const el=$('view-'+v); if(el) el.style.display=(tab===v)?'':'none';
       });
       if(tab==='historico') loadHist();
       if(tab==='beneficios') benefInit();
+      if(tab==='usuarios') usrInit();
     });
   });
   document.querySelectorAll('.ffbtn').forEach(b=>{
@@ -1183,30 +1266,64 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
     if(error){ $('loginMsg').textContent='Falha no login: '+error.message; return; }
     session=data.session; $('loginMsg').textContent=''; $('loginPass').value='';
+    await carregaPapel();
+    if(!meuPapel){
+      $('loginMsg').textContent='Login feito, mas sua conta ainda não tem permissão. Peça a um administrador para liberar seu acesso.';
+    }
     applyAuthUI(); await load();
   }
   async function doLogout(){
     if(!sb) return;
-    await sb.auth.signOut(); session=null; applyAuthUI(); await load();
+    await sb.auth.signOut(); session=null; meuPapel=null; applyAuthUI(); await load();
   }
   function applyAuthUI(){
-    const logged=canEdit();
-    $('loginForm').style.display=logged?'none':'';
-    $('userBox').style.display=logged?'':'none';
-    if(logged && session && session.user) $('userEmail').textContent=session.user.email||'logado';
-    root.classList.toggle('readonly', !logged);
+    const entrou = !!session;          /* tem sessao */
+    const edita  = canEdit();          /* admin ou importador */
+    $('loginForm').style.display=entrou?'none':'';
+    $('userBox').style.display=entrou?'':'none';
+    if(entrou && session.user){
+      $('userEmail').textContent = (session.user.email||'logado') +
+        (meuPapel ? ' · '+PAPEL_NOME[meuPapel] : ' · sem permissão');
+    }
+    root.classList.toggle('readonly', !edita);
     // habilita/desabilita controles de edição
-    document.querySelectorAll('.cell-input, .sit-sel').forEach(el=>{ el.disabled=!logged; });
-    ['addBtn','importBtn'].forEach(id=>{ const b=$(id); if(b) b.disabled=!logged; });
-    $('roBadge').style.display=logged?'none':'';
-    if($('benefLock')){ $('benefLock').style.display=logged?'none':''; $('benefForm').style.display=logged?'':'none'; }
+    document.querySelectorAll('.cell-input, .sit-sel').forEach(el=>{ el.disabled=!edita; });
+    ['addBtn','importBtn'].forEach(id=>{ const b=$(id); if(b) b.disabled=!edita; });
+    $('roBadge').style.display=edita?'none':'';
+
+    /* aba Usuarios: so' admin. Esconder aqui e' conveniencia — quem barra
+       de verdade e' a Edge Function, que confere o papel no servidor. */
+    const tu=$('tabUsuarios');
+    if(tu){
+      tu.style.display = isAdmin() ? '' : 'none';
+      if(!isAdmin() && tab==='usuarios'){
+        document.querySelector('.tab[data-tab="todos"]').click();
+      }
+    }
+
+    if($('benefLock')){
+      const ve = podeVerBeneficios();
+      $('benefLock').style.display = ve?'none':'';
+      $('benefForm').style.display = ve?'':'none';
+      $('benefLock').innerHTML = entrou && !meuPapel
+        ? '<b>Sua conta ainda não tem permissão.</b> Peça a um administrador para liberar seu acesso na aba Usuários.'
+        : '<b>Faça login para usar esta aba.</b> Os dados de benefício incluem licença médica '+
+          '(dado sensível) e só ficam disponíveis para usuários autenticados.';
+      /* leitor ve' os dados, mas nao importa nem grava */
+      ['benefPdfBtn','benefSaveBtn','benefXlsxBtn'].forEach(id=>{
+        const b=$(id); if(b && !edita) b.disabled=true;
+      });
+    }
   }
 
   async function start(){
     if(!initSupabase()){ render(); return; }
     const { data } = await sb.auth.getSession();
     session = data && data.session ? data.session : null;
-    sb.auth.onAuthStateChange((_e,s)=>{ session=s||null; applyAuthUI(); });
+    await carregaPapel();
+    sb.auth.onAuthStateChange(async (_e,s)=>{
+      session=s||null; await carregaPapel(); applyAuthUI();
+    });
     $('loginBtn').addEventListener('click',doLogin);
     $('logoutBtn').addEventListener('click',doLogout);
     $('loginPass').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
@@ -1223,6 +1340,144 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
   function reapplyDisabled(){
     const logged=canEdit();
     document.querySelectorAll('.cell-input, .sit-sel').forEach(el=>{ el.disabled=!logged; });
+  }
+
+  /* ==================== GESTÃO DE USUÁRIOS (só admin) ====================
+     Criar login exige a chave service_role, que da' poder total sobre o
+     banco e por isso NAO pode existir neste arquivo — ele e' estatico e
+     publico. Toda operacao passa pela Edge Function 'admin-usuarios', que
+     confere no servidor se quem chamou e' admin ativo. A tela abaixo e'
+     so' o formulario.
+     ===================================================================== */
+  var usrCarregando = false;
+
+  function usrMsg(t, err){
+    const el=$('usrMsg'); if(!el) return;
+    el.style.display=''; el.innerHTML=t;
+    el.style.background = err ? '#fee2e2' : '#ecfdf5';
+    el.style.borderColor = err ? '#ef4444' : '#10b981';
+  }
+
+  async function usrChamar(payload){
+    if(!sb || !session) throw new Error('Faça login novamente.');
+    const { data, error } = await sb.functions.invoke('admin-usuarios', { body: payload });
+    if(error){
+      /* o corpo da resposta traz o motivo real; o erro do supabase-js e' generico */
+      let detalhe = '';
+      try{ detalhe = (await error.context.json()).erro || ''; }catch(e){}
+      throw new Error(detalhe || error.message ||
+        'Não consegui falar com o servidor. Confira se a função admin-usuarios foi publicada.');
+    }
+    if(data && data.erro) throw new Error(data.erro);
+    return data;
+  }
+
+  function usrLinha(u){
+    const meu = session && session.user &&
+      String(session.user.email).toLowerCase() === u.email;
+    const sel = ['leitor','importador','admin'].map(p =>
+      '<option value="'+p+'"'+(u.papel===p?' selected':'')+'>'+esc(PAPEL_NOME[p])+'</option>'
+    ).join('');
+    const convite = !u.tem_login
+      ? '<span style="color:#b45309">convite pendente</span>'
+      : (u.convite_aceito ? 'aceito' : '<span style="color:#b45309">pendente</span>');
+    const acesso = u.ultimo_acesso
+      ? new Date(u.ultimo_acesso).toLocaleString('pt-BR') : '—';
+    return '<tr>'+
+      '<td>'+esc(u.email)+(meu?' <b>(você)</b>':'')+'</td>'+
+      '<td>'+esc(u.nome||'—')+'</td>'+
+      '<td><select class="sit-sel usr-papel" data-email="'+esc(u.email)+'">'+sel+'</select></td>'+
+      '<td>'+(u.ativo?'Ativo':'<span style="color:#b23">Desativado</span>')+'</td>'+
+      '<td>'+convite+'</td>'+
+      '<td>'+esc(acesso)+'</td>'+
+      '<td style="white-space:nowrap">'+
+        '<button class="btn btn-ghost usr-toggle" data-email="'+esc(u.email)+'" '+
+          'data-acao="'+(u.ativo?'desativar':'ativar')+'">'+
+          (u.ativo?'Desativar':'Reativar')+'</button> '+
+        (meu?'':'<button class="btn btn-ghost usr-remover" data-email="'+esc(u.email)+'">Remover</button>')+
+      '</td></tr>';
+  }
+
+  async function usrCarregar(){
+    if(usrCarregando) return;
+    const tb=$('usrTbody'); if(!tb) return;
+    usrCarregando = true;
+    tb.innerHTML='<tr><td colspan="7">Carregando...</td></tr>';
+    try{
+      const r = await usrChamar({ acao:'listar' });
+      const lista = (r && r.usuarios) || [];
+      tb.innerHTML = lista.length
+        ? lista.map(usrLinha).join('')
+        : '<tr><td colspan="7">Nenhuma pessoa cadastrada.</td></tr>';
+      usrLigaAcoes();
+    }catch(e){
+      tb.innerHTML='';
+      usrMsg('Não foi possível carregar a lista: '+esc(e.message), true);
+    }finally{ usrCarregando=false; }
+  }
+
+  function usrLigaAcoes(){
+    document.querySelectorAll('.usr-papel').forEach(s=>{
+      s.addEventListener('change', async ()=>{
+        const email=s.dataset.email, papel=s.value;
+        try{
+          await usrChamar({ acao:'alterar_papel', email, papel });
+          usrMsg('✓ '+esc(email)+' agora é <b>'+esc(PAPEL_NOME[papel])+'</b>.');
+          logHist('permissão alterada','', email+' → '+PAPEL_NOME[papel]);
+          usrCarregar();
+        }catch(e){ usrMsg('Erro: '+esc(e.message), true); usrCarregar(); }
+      });
+    });
+    document.querySelectorAll('.usr-toggle').forEach(b=>{
+      b.addEventListener('click', async ()=>{
+        const email=b.dataset.email, acao=b.dataset.acao;
+        if(acao==='desativar' && !confirm('Desativar '+email+'?\n\nA pessoa perde o acesso imediatamente, mas o cadastro é mantido e pode ser reativado depois.')) return;
+        try{
+          await usrChamar({ acao, email });
+          usrMsg('✓ '+esc(email)+' foi '+(acao==='ativar'?'reativado':'desativado')+'.');
+          logHist('acesso '+(acao==='ativar'?'reativado':'desativado'),'', email);
+          usrCarregar();
+        }catch(e){ usrMsg('Erro: '+esc(e.message), true); }
+      });
+    });
+    document.querySelectorAll('.usr-remover').forEach(b=>{
+      b.addEventListener('click', async ()=>{
+        const email=b.dataset.email;
+        if(!confirm('Remover '+email+' definitivamente?\n\nO cadastro sai da lista e não há como desfazer. Se a ideia for apenas tirar o acesso por um tempo, use Desativar.')) return;
+        const apagar = confirm('Apagar também o login da pessoa no Supabase?\n\nOK = apaga o login (ela precisará de um convite novo para voltar).\nCancelar = mantém o login, só tira a permissão.');
+        try{
+          await usrChamar({ acao:'remover', email, apagar_login: apagar });
+          usrMsg('✓ '+esc(email)+' foi removido.');
+          logHist('acesso removido','', email+(apagar?' (login apagado)':''));
+          usrCarregar();
+        }catch(e){ usrMsg('Erro: '+esc(e.message), true); }
+      });
+    });
+  }
+
+  function usrInit(){
+    if(!isAdmin()) return;
+    usrCarregar();
+    if(usrInit._pronto) return;
+    usrInit._pronto = true;
+    $('usrConvidar').addEventListener('click', async ()=>{
+      const email=$('usrEmail').value.trim().toLowerCase();
+      const nome=$('usrNome').value.trim();
+      const papel=$('usrPapel').value;
+      if(!email || email.indexOf('@')<0){ usrMsg('Informe um e-mail válido.', true); return; }
+      const btn=$('usrConvidar'); btn.disabled=true; btn.textContent='Enviando...';
+      try{
+        const r = await usrChamar({ acao:'convidar', email, nome, papel,
+          redirect: location.href.split('#')[0] });
+        usrMsg('✓ Convite enviado para <b>'+esc(email)+'</b> como '+esc(PAPEL_NOME[papel])+
+          '. Ela precisa clicar no link do e-mail e criar a senha antes de conseguir entrar.'+
+          (r && r.aviso ? '<br>'+esc(r.aviso) : ''));
+        logHist('convite enviado','', email+' → '+PAPEL_NOME[papel]);
+        $('usrEmail').value=''; $('usrNome').value='';
+        usrCarregar();
+      }catch(e){ usrMsg('Erro: '+esc(e.message), true); }
+      finally{ btn.disabled=false; btn.textContent='✉ Enviar convite'; }
+    });
   }
 
 /* ==================== MÓDULO DE BENEFÍCIOS (VR/VA) ====================
@@ -1321,9 +1576,14 @@ function benefSyncDatas(){
 }
 
 function benefInit(){
-  var logged = canEdit();
-  $('benefLock').style.display = logged ? 'none' : '';
-  $('benefForm').style.display = logged ? '' : 'none';
+  /* ver e editar sao coisas diferentes: o leitor enxerga a apuracao inteira
+     (por isso a aba abre), mas nao anexa espelho nem grava competencia. */
+  var ve = podeVerBeneficios(), edita = canEdit();
+  $('benefLock').style.display = ve ? 'none' : '';
+  $('benefForm').style.display = ve ? '' : 'none';
+  ['benefPdfBtn','benefSaveBtn','benefXlsxBtn'].forEach(function(id){
+    var b=$(id); if(b && !edita) b.disabled = true;
+  });
   if(benefState.inited){ benefSyncDatas(); return; }
   benefState.inited=true;
   $('benefRef').addEventListener('change', benefSyncDatas);
