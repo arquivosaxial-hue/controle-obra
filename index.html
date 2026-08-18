@@ -519,7 +519,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.0';
+var APP_VERSION = '3.2';
 var APP_BUILD   = '2026-07-23';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -2128,8 +2128,10 @@ async function benefGerarXlsx(){
 
   /* ================= ABA 1: CONTROLE ================= */
   var ws=wb.addWorksheet('CONTROLE',{views:[{state:'frozen',xSplit:3,ySplit:6}]});
+  /* o nome vem da lista fixa quando a obra e' conhecida (igua); nas demais,
+     c.obra ja' e' o proprio nome lido do Departamento do espelho */
   ws.getCell('A1').value='CONTROLE DE BENEFÍCIOS – '+
-    ((BENEF_OBRAS[c.obra||'igua']||{}).nome||'RECOMPOSIÇÃO IGUÁ').toUpperCase();
+    String((BENEF_OBRAS[c.obra]||{}).nome || c.obra || 'RECOMPOSIÇÃO IGUÁ').toUpperCase();
   ws.getCell('A1').font=ARI(12,true);
   ws.getCell('A2').value={formula:'"Apuração do ponto: "&DAY($C$2)&"/"&MONTH($C$2)&"/"&YEAR($C$2)'+
     '&" a "&DAY(EDATE($C$2,1)-1)&"/"&MONTH(EDATE($C$2,1)-1)&"/"&YEAR(EDATE($C$2,1)-1)'+
@@ -2171,7 +2173,10 @@ async function benefGerarXlsx(){
     cdd.border=BD; cdd.alignment={horizontal:'center'};
   }
   var TOT=['SÁBADO','DOMINGO','FERIADO','TOTAL A ADICIONAR','FALTA','ATESTADO','FALTA ABONADA',
-           'TOTAL A DESCONTAR','FÉRIAS','EXAME','ATESTADO FDS','INSS','DIAS DE BENEFÍCIO '+mesBenef];
+           'TOTAL A DESCONTAR','FÉRIAS','EXAME','ATESTADO FDS','INSS','DIAS DE BENEFÍCIO '+mesBenef,
+           'CESTA BÁSICA'];
+  /* indice das colunas de totais, para nao contar na mao ao mexer na lista */
+  var COL_FALTA=4, COL_DIAS=12, COL_INSS=11, COL_CESTA=13;
   TOT.forEach(function(t,i){
     var cel=ws.getCell(CL(C0+NS+i)+HDR); cel.value=t;
     cel.font=ARI(9,true,false,'FFFFFFFF'); cel.fill=HDRF; cel.border=BD;
@@ -2207,7 +2212,7 @@ async function benefGerarXlsx(){
       cel.font=ARI(10,true); cel.fill=TOTF; cel.border=BD; cel.alignment=CT;
     }
     soma(3,0,1,2); soma(7,4,5,6);
-    var res=ws.getCell(CL(C0+NS+12)+r);
+    var res=ws.getCell(CL(C0+NS+COL_DIAS)+r);
     if(l.semEspelho){
       /* valor fixo: a formula MAX(0,$C$4+...) recalcularia para a base cheia,
          desfazendo o zero de quem nao tinha espelho no periodo */
@@ -2217,6 +2222,19 @@ async function benefGerarXlsx(){
       res.value={formula:'IF('+CL(C0+NS+11)+r+'>0,0,MAX(0,$C$4+'+CL(C0+NS+3)+r+'-'+CL(C0+NS+7)+r+'))'};
     }
     res.font=ARI(11,true); res.fill=RESF; res.border=BD; res.alignment=CT;
+
+    /* cesta basica: perde com qualquer falta injustificada no periodo, e
+       tambem quem esteve afastado pelo INSS. E' formula, nao valor fixo: se o
+       codigo for corrigido na grade, o sim/nao se ajusta sozinho. */
+    var ces=ws.getCell(CL(C0+NS+COL_CESTA)+r);
+    if(l.semEspelho){
+      ces.value='—';
+      ces.note='Sem espelho de ponto neste período — não há como avaliar.';
+    } else {
+      ces.value={formula:'IF(OR('+CL(C0+NS+COL_FALTA)+r+'>0,'+
+        CL(C0+NS+COL_INSS)+r+'>0),"NÃO","SIM")'};
+    }
+    ces.font=ARI(11,true); ces.border=BD; ces.alignment=CT;
   });
 
   var tl=ws.getCell('B'+TOTR); tl.value='TOTAL';
@@ -2225,14 +2243,25 @@ async function benefGerarXlsx(){
   for(var j3=0;j3<NS;j3++){ var cel=ws.getCell(CL(C0+j3)+TOTR); cel.fill=TOTF; cel.border=BD; }
   for(var i2=0;i2<TOT.length;i2++){
     var cl=CL(C0+NS+i2), cel2=ws.getCell(cl+TOTR);
-    cel2.value={formula:'SUM('+cl+R0+':'+cl+LAST+')'};
-    cel2.font=ARI(i2===TOT.length-1?11:10,true);
-    cel2.fill=(i2===TOT.length-1)?RESF:TOTF; cel2.border=BD; cel2.alignment=CT;
+    /* a cesta e' texto: somar daria zero. Conta quantos tem direito. */
+    cel2.value = (i2===COL_CESTA)
+      ? {formula:'COUNTIF('+cl+R0+':'+cl+LAST+',"SIM")'}
+      : {formula:'SUM('+cl+R0+':'+cl+LAST+')'};
+    cel2.font=ARI(i2===COL_DIAS?11:10,true);
+    cel2.fill=(i2===COL_DIAS)?RESF:TOTF; cel2.border=BD; cel2.alignment=CT;
   }
 
   ws.getColumn(1).width=10; ws.getColumn(2).width=38; ws.getColumn(3).width=26;
   for(var k=0;k<NS;k++) ws.getColumn(C0+k).width=4.9;
-  [10,10,9,11,8,10,12,11,8,8,11,7,14].forEach(function(w,i){ ws.getColumn(C0+NS+i).width=w; });
+  [10,10,9,11,8,10,12,11,8,8,11,7,14,13].forEach(function(w,i){ ws.getColumn(C0+NS+i).width=w; });
+
+  /* verde claro = tem direito, vermelho claro = perdeu. Formatacao condicional
+     (nao cor fixa) para acompanhar a formula se um codigo for corrigido. */
+  var refCesta=CL(C0+NS+COL_CESTA)+R0+':'+CL(C0+NS+COL_CESTA)+LAST;
+  ws.addConditionalFormatting({ref:refCesta, rules:[
+    {type:'cellIs',operator:'equal',formulae:['"SIM"'],style:{fill:FILL('FFC6E0B4')}}]});
+  ws.addConditionalFormatting({ref:refCesta, rules:[
+    {type:'cellIs',operator:'equal',formulae:['"NÃO"'],style:{fill:FILL('FFFF9999')}}]});
 
   var GRID=CL(C0)+R0+':'+CL(C0+NS-1)+LAST;
   for(var rr=R0;rr<=LAST;rr++){
@@ -2295,6 +2324,7 @@ async function benefGerarXlsx(){
     ['• Horas abonadas (motivo 000013 – abono gerencial) não geram desconto, conforme orientação.'],
     ['• Atestado de comparecimento (motivo 000025): se o colaborador compareceu no dia, não desconta; se não compareceu, entra como atestado (A).'],
     ['• Dias úteis com mais de '+Math.floor(BENEF_EXTRA_MAX/60)+'h de hora extra foram tratados como erro de marcação: o dia vale, mas não gera o adicional de 3h. Constam na aba PENDÊNCIAS para lançamento manual.'],
+    ['• CESTA BÁSICA: perde-se o benefício do mês inteiro com qualquer FALTA injustificada (código F) no período, ou com afastamento pelo INSS (código IN). Falta abonada (FA) e atestado (A) não tiram a cesta. Sem perda = SIM (verde); com perda = NÃO (vermelho). A coluna é fórmula: se você corrigir um código na grade, ela se ajusta sozinha.'],
     ['• Colaboradores com situação AFASTADO no cadastro têm o benefício zerado, independentemente do que consta no espelho de ponto.'],
     ['• Feriados informados: '+((c.feriados||'').split(',').filter(Boolean)
         .map(function(x){return x.split('-').reverse().join('/');}).join(', ')||'nenhum')+
@@ -2306,8 +2336,15 @@ async function benefGerarXlsx(){
   lg.forEach(function(row){ wl.addRow(row); });
   wl.getColumn(1).width=10; wl.getColumn(2).width=42; wl.getColumn(3).width=52;
   wl.eachRow(function(row){ row.eachCell(function(cel){ if(!cel.font) cel.font=ARI(10); }); });
-  [1,16,21,27,33,41].forEach(function(r){
-    var cel=wl.getCell('A'+r); if(cel.value) cel.font=ARI(11,true,false,'FF1F4E79');
+  /* titulos de secao localizados pelo texto, nao por numero de linha fixo:
+     qualquer frase acrescentada a' legenda deslocaria a numeracao. */
+  var TITULOS=['LEGENDA DE CÓDIGOS','FÓRMULA DE CÁLCULO','COMO USAR A CADA COMPETÊNCIA',
+               'ABA "VR ADICIONAL 3H"','PREMISSAS ADOTADAS NO PREENCHIMENTO INICIAL',
+               'ARQUIVO DE ORIGEM'];
+  lg.forEach(function(row,i){
+    if(row.length===1 && TITULOS.indexOf(String(row[0]))>=0){
+      wl.getCell('A'+(i+1)).font=ARI(11,true,false,'FF1F4E79');
+    }
   });
   ['A3','B3','C3'].forEach(function(a){
     var cel=wl.getCell(a); cel.font=ARI(10,true,false,'FFFFFFFF');
