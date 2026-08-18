@@ -358,11 +358,13 @@
           </div>
           <div id="benefOutrasAviso" style="display:none;padding:11px 13px;background:#eff6ff;
                border:1px solid #93c5fd;border-radius:7px;margin-bottom:14px;font-size:.86rem">
-            <b>Módulo em preparação.</b> O leitor do espelho de ponto das outras obras ainda não
-            foi construído — o formato do relatório é diferente do Iguá. Assim que o modelo do PDF
-            for enviado, esta aba passa a funcionar igual à do Iguá.
+            <b>A obra é lida do próprio PDF.</b> O nome vem do campo <b>Departamento</b> do espelho
+            (ex.: <i>SECID - MESQUITA</i>) — não precisa escolher nada aqui. Anexe um espelho por
+            obra: se o PDF trouxer departamentos diferentes misturados, a importação é recusada.
             <div style="margin-top:6px;color:var(--muted)">
-              As apurações das duas obras são gravadas e exportadas separadamente.
+              Cada obra tem competência, planilha e nome de arquivo próprios. Como esse pessoal não
+              está no cadastro do app, o cruzamento com o efetivo fica desligado: o espelho é a
+              única fonte.
             </div>
           </div>
           <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
@@ -459,7 +461,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '2.8';
+var APP_VERSION = '2.9';
 var APP_BUILD   = '2026-07-23';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -1231,10 +1233,18 @@ var benefState = { linhas:[], pendencias:[], comp:null, arquivo:null, inited:fal
 
 /* obra ativa na aba Beneficios. Cada obra tem apuracao e planilha proprias. */
 var BENEF_OBRAS = {
-  igua:   { nome:'Recomposição Iguá', pronta:true,  cruzaCadastro:true  },
-  outras: { nome:'Outras Obras',      pronta:false, cruzaCadastro:false }
+  igua:   { nome:'Recomposição Iguá', pronta:true, cruzaCadastro:true,  auto:false },
+  /* auto:true = a obra vem do campo Departamento do proprio PDF, nao de uma
+     lista fixa. Um espelho por obra; PDF com departamentos misturados e' recusado. */
+  outras: { nome:'Outras Obras',      pronta:true, cruzaCadastro:false, auto:true  }
 };
 var benefObra = 'igua';
+
+/* Teto de hora extra num unico dia util. Acima disso a marcacao esta furada
+   (relogio virando o dia, saida antes da entrada). O dia continua valendo como
+   trabalhado, mas NAO gera o adicional de 3h — sai como pendencia para conferir
+   na mao. Sem isso, uma marcacao errada vira R$ 30,00 pagos indevidamente. */
+var BENEF_EXTRA_MAX = 360;
 
 function benefTrocaObra(obra){
   if(!BENEF_OBRAS[obra] || obra===benefObra) return;
@@ -1247,10 +1257,12 @@ function benefTrocaObra(obra){
   Array.prototype.forEach.call(document.querySelectorAll('.subtab'), function(b){
     b.classList.toggle('active', b.getAttribute('data-obra')===obra);
   });
-  $('benefOutrasAviso').style.display = cfg.pronta ? 'none' : '';
+  /* o aviso explica que a obra vem do PDF — vale para as subabas automaticas,
+     nao para as de obra fixa. Nao confundir com cfg.pronta. */
+  $('benefOutrasAviso').style.display = cfg.auto ? '' : 'none';
   /* limpa o resultado da obra anterior: os dados nao se misturam */
   benefState.linhas=[]; benefState.pendencias=[];
-  benefState.comp=null; benefState.arquivo=null;
+  benefState.comp=null; benefState.arquivo=null; benefState.obraNome=null;
   $('benefTbody').innerHTML=''; $('benefTableCard').style.display='none';
   $('benefAlertas').innerHTML='';
   $('benefMsg').style.display='none';
@@ -1400,6 +1412,14 @@ function benefCodigo(dow, resto, licDias, ehFeriado){
     if(licDias>15) return 'IN';
     return fds ? 'AFS' : 'A';
   }
+  /* atestado de comparecimento (motivo 000025): justifica chegar tarde ou sair
+     cedo. Se o colaborador compareceu — ha horas trabalhadas na linha — o dia
+     conta normal e nao desconta. Se nao foi trabalhar, desconta como atestado
+     comum. Nao confundir com LICENCA MEDICA, tratada acima. */
+  if(r.indexOf('ATESTADO')>=0){
+    if(benefTrabalhou(resto)) return '';
+    return fds ? 'AFS' : 'A';
+  }
   if(r.indexOf('FÉRIAS')>=0 || r.indexOf('FERIAS')>=0) return 'FE';
   if(r.indexOf('* FALTA')>=0) return 'F';
   if(/\b0000(30|23)\b/.test(r)) return 'E';
@@ -1421,6 +1441,23 @@ function benefExtraMin(resto){
   if(!campos || campos.length<3) return 0;
   var ex = campos[campos.length-3].split(':');
   return (+ex[0])*60 + (+ex[1]);
+}
+
+/* ---------- obra lida do campo Departamento do espelho ----------
+   O cabecalho sai como uma linha so:
+     "SECID - MESQUITA 18/08/2026 11:26 16/07/2026 - 15/08/2026 jul/2026"
+   O departamento e' tudo que vem antes da data/hora de emissao. Como o nome da
+   obra pode conter hifen ("SECID - MESQUITA"), a ancora e' a emissao, nunca o
+   separador. Retorna a lista de departamentos distintos encontrados. */
+function benefDepartamentos(txt){
+  var re=/^(.+?)\s+\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}\s+\d{2}\/\d{2}\/\d{4}\s*-\s*\d{2}\/\d{2}\/\d{4}/gm;
+  var m, visto={}, out=[];
+  while((m=re.exec(txt))!==null){
+    var d=m[1].replace(/\s+/g,' ').trim();
+    if(!d || /^Departamento$/i.test(d)) continue;
+    if(!visto[d]){ visto[d]=true; out.push(d); }
+  }
+  return out;
 }
 
 function benefIsoDe(br){ var p=br.split('/'); return p[2]+'-'+p[1]+'-'+p[0]; }
@@ -1473,6 +1510,25 @@ async function benefProcessaPdf(file){
   }
 
   var emitido = (txt.match(/(\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2})/)||[])[1] || null;
+
+  /* obra: nas subabas automaticas quem manda e' o Departamento do espelho.
+     Um PDF com mais de uma obra e' recusado: a competencia e' unica por obra
+     e misturar geraria uma apuracao que nao bate com nenhuma folha. */
+  var obraId = benefObra, obraNome = BENEF_OBRAS[benefObra].nome;
+  if(BENEF_OBRAS[benefObra].auto){
+    var deps = benefDepartamentos(txt);
+    if(!deps.length){
+      benefMsg('Não consegui ler o campo <b>Departamento</b> neste espelho, então não sei '+
+        'de que obra ele é. Confira se o PDF saiu completo do Wponto.',true);
+      benefProgFim(); fimProc(); return;
+    }
+    if(deps.length>1){
+      benefMsg('Este PDF tem <b>'+deps.length+' obras misturadas</b>: '+
+        deps.map(esc).join(' · ')+'. Gere um espelho por obra e anexe um de cada vez.',true);
+      benefProgFim(); fimProc(); return;
+    }
+    obraId = deps[0]; obraNome = deps[0];
+  }
 
   var noPeriodo = {}, _cur = ini;
   while(_cur <= fim){ noPeriodo[_cur]=true; _cur = benefAddDias(_cur, 1); }
@@ -1531,15 +1587,22 @@ async function benefProcessaPdf(file){
     });
 
     var c={S:0,D:0,FR:0,F:0,A:0,AFS:0,FA:0,FE:0,E:0,IN:0};
-    var ocor=[], extras=[], suspeitos=[];
+    var ocor=[], extras=[], suspeitos=[], atestComp=[];
     dias.forEach(function(x){
       var iso=benefIsoDe(x[0]); if(!noPeriodo[iso]) return;
       var cod=benefCodigo(x[1], x[2], licDias, !!feriados[iso]);
       if(cod) c[cod]++;
+      /* atestado de comparecimento aceito (compareceu, sem desconto): registra
+         para conferencia, senao o dia sumiria da planilha sem deixar rastro */
+      if(!cod && x[2].toUpperCase().indexOf('ATESTADO')>=0) atestComp.push(x[0]);
       var em=benefExtraMin(x[2]);
       var ehFds = (x[1]==='sáb'||x[1]==='sab'||x[1]==='dom');
-      if(em>=limiar && !ehFds) extras.push(iso);
-      if(em > 360) suspeitos.push(x[0]+' (extra '+Math.floor(em/60)+'h'+(em%60)+')');
+      var absurdo = em > BENEF_EXTRA_MAX;
+      if(em>=limiar && !ehFds && !absurdo) extras.push(iso);
+      if(absurdo) suspeitos.push(x[0]+' — extra de '+Math.floor(em/60)+'h'+
+        String(em%60).padStart(2,'0')+', acima do teto de '+
+        Math.floor(BENEF_EXTRA_MAX/60)+'h. O dia continua valendo, mas não entrou '+
+        'no adicional de 3h');
       ocor.push({data:iso, codigo:cod||null, extra_minutos:em});
     });
 
@@ -1554,7 +1617,7 @@ async function benefProcessaPdf(file){
       sabados:c.S, domingos:c.D, feriados:c.FR, faltas:c.F, atestados:c.A,
       atestados_fds:c.AFS, faltas_abonadas:c.FA, ferias:c.FE, exames:c.E, inss:c.IN,
       dias_beneficio:dias_beneficio, dias_extra_3h:extras.length,
-      _ocor:ocor, _extras:extras, _suspeitos:suspeitos});
+      _ocor:ocor, _extras:extras, _suspeitos:suspeitos, _atestComp:atestComp});
   }
 
   if(!linhas.length){
@@ -1596,6 +1659,12 @@ async function benefProcessaPdf(file){
         descricao:'Registro suspeito: '+s,
         acao_sugerida:'Pedir correção ao DP no Wponto. Não corrigir aqui.'});
     });
+    if((l._atestComp||[]).length){
+      pend.push({matricula:l.matricula, nome:l.nome, tipo:'ATESTADO_COMPAR',
+        descricao:'Atestado de comparecimento em '+l._atestComp.join(', ')+
+          ' — compareceu ao trabalho no dia, então não foi descontado.',
+        acao_sugerida:'Conferir no espelho se realmente trabalhou. Se não foi, o dia vira atestado (A) e desconta.'});
+    }
   });
 
   ativos.forEach(function(r){
@@ -1620,7 +1689,8 @@ async function benefProcessaPdf(file){
   benefState.arquivo={nome:file.name, hash:hash, emitido:emitido};
   benefState.comp={referencia:$('benefRef').value+'-01', periodo_inicio:ini,
     periodo_fim:fim, base_dias_uteis:base, limiar_extra_min:limiar,
-    feriados:Object.keys(feriados).sort().join(','), obra:benefObra};
+    feriados:Object.keys(feriados).sort().join(','), obra:obraId};
+  benefState.obraNome = obraNome;
 
   benefProg(98,'Montando a tabela...');
   await benefTick();
@@ -1628,7 +1698,8 @@ async function benefProcessaPdf(file){
   benefProgFim();
   var tot = linhas.reduce(function(s,l){ return s+l.dias_beneficio; },0);
   var tot3h = linhas.reduce(function(s,l){ return s+l.dias_extra_3h; },0);
-  benefMsg('<b>'+linhas.length+' colaboradores</b> · total <b>'+tot+' dias</b> de benefício · '+
+  benefMsg((BENEF_OBRAS[benefObra].auto ? 'Obra <b>'+esc(obraNome)+'</b> · ' : '')+
+    '<b>'+linhas.length+' colaboradores</b> · total <b>'+tot+' dias</b> de benefício · '+
     tot3h+' dia(s) com 3h+ extra (R$ '+(tot3h*30)+',00 adicionais) · '+
     pend.length+' pendência(s).');
   $('benefSaveBtn').disabled=false; $('benefXlsxBtn').disabled=false;
@@ -1656,7 +1727,8 @@ function benefRender(){
     grupos[p.tipo].push(p);
   });
   var titulos={SEM_ESPELHO:'Sem espelho de ponto',SEM_CADASTRO:'Sem cadastro no efetivo',
-    ERRO_PONTO:'Possível erro de ponto',ADMISSAO_PARCIAL:'Admissão dentro do período'};
+    ERRO_PONTO:'Possível erro de ponto',ADMISSAO_PARCIAL:'Admissão dentro do período',
+    ATESTADO_COMPAR:'Atestado de comparecimento (não descontado)'};
   al.innerHTML = '<div class="card" style="padding:14px;margin-bottom:14px">'+
     '<b>Pendências detectadas ('+benefState.pendencias.length+')</b>'+
     Object.keys(grupos).map(function(t){
@@ -1683,7 +1755,7 @@ async function benefGravar(){
     var jaTem = await sb.from('beneficio_competencia')
       .select('id,arquivo_nome,criado_em,criado_por')
       .eq('referencia', benefState.comp.referencia)
-      .eq('obra', benefObra).maybeSingle();
+      .eq('obra', benefState.comp.obra).maybeSingle();
     if(jaTem.data){
       var q = jaTem.data.criado_em ? new Date(jaTem.data.criado_em).toLocaleString('pt-BR') : 'data desconhecida';
       var msg = 'Já existe uma apuração gravada para '+
@@ -1745,7 +1817,7 @@ async function benefGravar(){
       var r4 = await sb.from('beneficio_pendencia').insert(pd);
       if(r4.error) throw r4.error;
     }
-    logHist('Benefícios gravados', '', '['+BENEF_OBRAS[benefObra].nome+'] Competência '+benefState.comp.referencia+
+    logHist('Benefícios gravados', '', '['+(benefState.obraNome||BENEF_OBRAS[benefObra].nome)+'] Competência '+benefState.comp.referencia+
       ' · '+benefState.linhas.length+' colaboradores · arquivo '+benefState.arquivo.nome);
     benefMsg('✓ Competência gravada na nuvem ('+benefState.linhas.length+' linhas, '+ocs.length+' ocorrências).');
     showFlash();
@@ -1961,6 +2033,8 @@ async function benefGerarXlsx(){
     ['• Licenças médicas em sábado ou domingo foram classificadas como AFS e não geram desconto.'],
     ['• Motivos 000023 (exame periódico) e 000030 (exame troca de função) do Wponto foram classificados como E.'],
     ['• Horas abonadas (motivo 000013 – abono gerencial) não geram desconto, conforme orientação.'],
+    ['• Atestado de comparecimento (motivo 000025): se o colaborador compareceu no dia, não desconta; se não compareceu, entra como atestado (A).'],
+    ['• Dias úteis com mais de '+Math.floor(BENEF_EXTRA_MAX/60)+'h de hora extra foram tratados como erro de marcação: o dia vale, mas não gera o adicional de 3h. Constam na aba PENDÊNCIAS para lançamento manual.'],
     ['• Colaboradores com situação AFASTADO no cadastro têm o benefício zerado, independentemente do que consta no espelho de ponto.'],
     ['• Feriados informados: '+((c.feriados||'').split(',').filter(Boolean)
         .map(function(x){return x.split('-').reverse().join('/');}).join(', ')||'nenhum')+
@@ -2089,7 +2163,12 @@ async function benefGerarXlsx(){
   benefGerando=false; benefProgFim();
   if(btnX){ btnX.disabled=false; btnX.textContent=txtX||'⬇ Baixar .xlsx (4 abas)'; }
   var blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  var sufObra = (c.obra && c.obra!=='igua') ? '_'+c.obra.toUpperCase() : '';
+  /* o nome da obra vem do PDF e pode ter espaco, hifen e acento — nada disso
+     pode ir para o nome do arquivo */
+  var sufObra = (c.obra && c.obra!=='igua')
+    ? '_'+c.obra.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'')
+    : '';
   var nm='CONTROLE_BENEFICIOS'+sufObra+'_'+mesBenef+'_'+c.referencia.slice(0,4)+'.xlsx';
   var a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=nm;
