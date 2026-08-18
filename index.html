@@ -200,6 +200,34 @@
 </style>
 
 <div id="dts-root">
+  <!-- Tela de entrada: cobre o app inteiro ate' o login. E' so' aparencia —
+       quem barra de verdade e' a RLS do Supabase. -->
+  <div id="gate" style="position:fixed;inset:0;z-index:9999;background:#0b6b4f;
+       display:flex;align-items:center;justify-content:center;padding:20px">
+    <div style="background:#fff;border-radius:12px;padding:32px 30px;max-width:400px;
+         width:100%;box-shadow:0 12px 40px rgba(0,0,0,.3)">
+      <div style="font-size:1.35rem;font-weight:800;color:#0b6b4f;margin-bottom:4px">
+        Controle de Obra</div>
+      <div style="color:#64748b;font-size:.88rem;margin-bottom:22px">
+        Construtora Axial · acesso restrito</div>
+      <label style="display:block;font-size:.8rem;font-weight:700;color:#475569;
+             margin-bottom:4px">E-mail</label>
+      <input id="gateEmail" type="email" autocomplete="username"
+             style="width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:7px;
+                    font-size:.95rem;margin-bottom:14px;box-sizing:border-box">
+      <label style="display:block;font-size:.8rem;font-weight:700;color:#475569;
+             margin-bottom:4px">Senha</label>
+      <input id="gatePass" type="password" autocomplete="current-password"
+             style="width:100%;padding:11px;border:1px solid #cbd5e1;border-radius:7px;
+                    font-size:.95rem;margin-bottom:18px;box-sizing:border-box">
+      <button id="gateBtn"
+              style="width:100%;padding:12px;background:#0b6b4f;color:#fff;border:none;
+                     border-radius:7px;font-size:.98rem;font-weight:700;cursor:pointer">
+        Entrar</button>
+      <div id="gateMsg" style="margin-top:14px;font-size:.86rem;min-height:20px"></div>
+    </div>
+  </div>
+
   <header class="top">
     <div class="wrap">
       <div class="brand">
@@ -519,7 +547,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.2';
+var APP_VERSION = '3.3';
 var APP_BUILD   = '2026-07-23';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -529,7 +557,10 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
 </script>
 <script>
 (function(){
-  const SEED = [{"codigo": "001104", "nome": "ANDERSON DIAS DOS SANTOS", "admissao": "2024-09-16", "cpf": "081.999.997-05", "funcao": "AJUDANTE", "salario": 1798, "vctoFerias": "2026-09-14", "concederAte": "2027-08-12"}, {"codigo": "001141", "nome": "CARLOS ALBERTO DE ASSIS FRANCA", "admissao": "2025-02-03", "cpf": "098.021.057-05", "funcao": "MOTORISTA DE VEICULO PESADO", "salario": 2303.38, "vctoFerias": "2026-02-01", "concederAte": "2026-12-30"}, {"codigo": "1176", "nome": "CELSO FERREIRA", "admissao": "2026-02-09", "cpf": "025.702.177-05", "funcao": "AJUDANTE", "salario": 1798, "vctoFerias": null, "concederAte": null}, {"codigo": "000722", "nome": "CHRISTIAN FREITAS DE AMORIM", "admissao": "2022-07-18", "cpf": "172.608.517-05", "funcao": "MOTORISTA DE VEICULO PESADO", "salario": 2303.38, "vctoFerias": "2026-07-16", "concederAte": "2027-06-13"}, {"codigo": "001018", "nome": "CLAUDIO DA SILVA CANDIDO", "admissao": "2023-11-27", "cpf": "054.270.127-05", "funcao": "AJUDANTE", "salario": 1798, "vctoFerias": "2025-11-25", "concederAte": "2026-10-23"}, {"codigo": "1178", "nome": "DIONATA BENTO DA SILVA", "admissao": "2026-02-10", "cpf": "199.145.547-05", "funcao": "AGENTE DE SANEAMENTO I", "salario": 2022.48, "vctoFerias": null, "concederAte": null}, {"codigo": "000608", "nome": "FABIO MARTINS DA SILVA", "admissao": "2022-04-26", "cpf": "106.105.057-05", "funcao": "PEDREIRO II", "salario": 2497.36, "vctoFerias": "2026-04-24", "concederAte": "2027-03-22"}, {"codigo": "001049", "nome": "FABIO RODRIGUES SOARES", "admissao": "2024-03-12", "cpf": "082.094.557-05", "funcao": "AJUDANTE", "salario": 1798, "vctoFerias": "2026-03-10", "concederAte": "2027-02-05"}, {"codigo": "000609", "nome": "FERNANDO ALMEIDA COSTA", "admissao": "2022-04-26", "cpf": "165.361.317-05", "funcao": "RASTELEIRO", "salario": 2840.57, "vctoFerias": "2026-04-24", "concederAte": "2027-03-22"}, {"codigo": "000864", "nome": "JEAN SOUZA DE CARVALHO", "admissao": "2022-10-17", "cpf": "127.068.577-05", "funcao": "PEDREIRO I", "salario": 2359.56, "vctoFerias": "2025-10-15", "concederAte": "2026-09-12"}, {"codigo": "000273", "nome": "JOSIMAR MIRANDA", "admissao": "2021-04-23", "cpf": "041.517.857-05", "funcao": "AUXILIAR TECNICO", "salario": 1798, "vctoFerias": "2026-06-08", "concederAte": "2027-05-06"}, {"codigo": "000973", "nome": "LEANDRO GADELHA DOS SANTOS", "admissao": "2023-08-01", "cpf": "126.379.727-05", "funcao": "PEDREIRO I", "salario": 2226, "vctoFerias": "2025-07-30", "concederAte": "2026-06-27"}, {"codigo": "000848", "nome": "LEONARDO DO NASCIMENTO", "admissao": "2022-10-04", "cpf": "051.757.787-05", "funcao": "RASTELEIRO", "salario": 2840.57, "vctoFerias": "2026-10-02", "concederAte": "2027-08-30"}, {"codigo": "1228", "nome": "LUIS GUSTAVO BOA MORTE DA SILVA", "admissao": "2026-05-21", "cpf": "141.140.957-05", "funcao": "AGENTE DE SANEAMENTO I", "salario": 2022.48, "vctoFerias": null, "concederAte": null}, {"codigo": "000923", "nome": "LUIZ GUILHERME BAHIENSE LEONARDO", "admissao": "2023-03-14", "cpf": "218.419.077-05", "funcao": "AJUDANTE", "salario": 1798, "vctoFerias": "2026-03-12", "concederAte": "2027-02-07"}, {"codigo": "000251", "nome": "MARCOS ANDERSON RODRIGUES DOS SANTOS", "admissao": "2021-04-16", "cpf": "146.663.257-05", "funcao": "AUX. ADMINISTRATIVO", "salario": 2745.83, "vctoFerias": "2027-04-14", "concederAte": "2028-03-12"}, {"codigo": "001153", "nome": "MARIA EDUARDA CEZAR EVANGELISTA DA SILVA", "admissao": "2025-08-25", "cpf": "042.821.611-05", "funcao": "APRENDIZ - AUX. ADMINISTRATIVO", "salario": 1142.33, "vctoFerias": "2026-08-23", "concederAte": "2027-07-21"}, {"codigo": "PJ", "nome": "MICHEL ALESSANDRO", "admissao": "2022-02-01", "cpf": "131.203.887-00", "funcao": "ENCARREGADO", "salario": 6500, "vctoFerias": null, "concederAte": null}, {"codigo": "000721", "nome": "ODILON HAZELMAN VIEIRA", "admissao": "2022-07-18", "cpf": "117.610.357-05", "funcao": "AJUDANTE", "salario": 1798, "vctoFerias": "2026-08-27", "concederAte": "2027-07-25"}, {"codigo": "000965", "nome": "RICARDO AUGUSTO DA SILVA", "admissao": "2023-06-16", "cpf": "149.172.127-05", "funcao": "AGENTE DE SANEAMENTO I", "salario": 2022.48, "vctoFerias": "2026-06-14", "concederAte": "2027-05-12"}, {"codigo": "000767", "nome": "RICARDO HENRIQUE RODRIGUES DA SILVA", "admissao": "2022-08-01", "cpf": "179.861.827-05", "funcao": "AUX. ADMINISTRATIVO", "salario": 2745.82, "vctoFerias": "2026-07-30", "concederAte": "2027-06-27"}, {"codigo": "001156", "nome": "THIAGO SODRE PULLERIO", "admissao": "2025-11-13", "cpf": "179.133.627-05", "funcao": "AJUDANTE", "salario": 1798, "vctoFerias": "2026-11-11", "concederAte": "2027-10-09"}, {"codigo": "1177", "nome": "UELITON SANTOS DE SOUZA", "admissao": "2026-02-09", "cpf": "099.969.787-05", "funcao": "AJUDANTE", "salario": 1798, "vctoFerias": null, "concederAte": null}, {"codigo": "000660", "nome": "VAGNER DOS SANTOS", "admissao": "2022-07-01", "cpf": "096.101.527-05", "funcao": "AGENTE DE SANEAMENTO II", "salario": 2697.39, "vctoFerias": "2026-06-29", "concederAte": "2027-05-27"}, {"codigo": "001151", "nome": "VALDEIR LAURINDO DA CRUZ", "admissao": "2025-08-15", "cpf": "121.643.887-05", "funcao": "AGENTE DE SANEAMENTO I", "salario": 2022.48, "vctoFerias": "2026-08-13", "concederAte": "2027-07-11"}, {"codigo": "000889", "nome": "VINICIUS RAMOS DOS SANTOS", "admissao": "2022-10-24", "cpf": "092.602.457-05", "funcao": "FISCAL", "salario": 2303.38, "vctoFerias": "2026-10-22", "concederAte": "2027-09-19"}, {"codigo": "000961", "nome": "WILTON PECANHA PINHEIRO", "admissao": "2023-06-14", "cpf": "083.788.987-05", "funcao": "MOTORISTA DE VEICULO PESADO", "salario": 2303.38, "vctoFerias": "2026-06-12", "concederAte": "2027-05-10"}];
+  /* O bloco SEED foi removido na V 3.3. Ele trazia 27 colaboradores com
+     CPF e salario escritos dentro deste arquivo, que e' servido publicamente:
+     qualquer visitante lia tudo pelo codigo-fonte, sem login. Servia apenas
+     para popular o banco na primeira carga, o que ja' foi feito ha' muito. */
   const TABLE='colaboradores';
   const HORIZON=60;
   let rows=[], sortKey='nome', sortDir=1, tab='todos', feriasFilter='60', sitFilter='todos', asoFilter='todos';
@@ -598,15 +629,9 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
       const { data, error } = await sb.from(TABLE).select('*').order('nome',{ascending:true});
       if(error) throw error;
       if(!data || !data.length){
-        if(canEdit()){
-          const seed=SEED.map(r=>Object.assign({id:uid(),status:'ativo'},r));
-          const { error: e2 } = await sb.from(TABLE).insert(seed.map(toDb));
-          if(e2) throw e2;
-          rows=seed;
-        } else {
-          rows=[];
-          banner('Base ainda vazia. Faça login para carregar os dados iniciais.', false);
-        }
+        /* sem carga automatica: o efetivo entra por importacao de planilha */
+        rows=[];
+        banner('Nenhum colaborador encontrado. Use "Importar planilha" para carregar o efetivo.', false);
       } else {
         rows=data.map(fromDb);
         banner('', false);
@@ -1272,15 +1297,56 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     }
     applyAuthUI(); await load();
   }
+  /* ---- login pela tela de entrada ---- */
+  async function doGateLogin(){
+    if(!sb) return;
+    const email=$('gateEmail').value.trim(), pass=$('gatePass').value;
+    const msg=$('gateMsg'), btn=$('gateBtn');
+    if(!email||!pass){ msg.style.color='#b23'; msg.textContent='Informe e-mail e senha.'; return; }
+    btn.disabled=true; btn.textContent='Entrando...';
+    msg.style.color='#64748b'; msg.textContent='Verificando...';
+    try{
+      const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+      if(error){
+        msg.style.color='#b23';
+        msg.textContent = /Invalid login/i.test(error.message||'')
+          ? 'E-mail ou senha incorretos.' : 'Não consegui entrar: '+error.message;
+        return;
+      }
+      session=data.session; $('gatePass').value='';
+      await carregaPapel();
+      if(!meuPapel){ applyAuthUI(); return; }   /* applyAuthUI escreve o aviso */
+      msg.textContent=''; applyAuthUI(); await load();
+    }finally{ btn.disabled=false; btn.textContent='Entrar'; }
+  }
+
   async function doLogout(){
     if(!sb) return;
-    await sb.auth.signOut(); session=null; meuPapel=null; applyAuthUI(); await load();
+    await sb.auth.signOut(); session=null; meuPapel=null;
+    $('gateEmail').value=''; $('gatePass').value=''; $('gateMsg').textContent='';
+    rows=[]; render();          /* limpa a tela antes de reexibir a entrada */
+    applyAuthUI();
   }
   function applyAuthUI(){
     const entrou = !!session;          /* tem sessao */
     const edita  = canEdit();          /* admin ou importador */
-    $('loginForm').style.display=entrou?'none':'';
-    $('userBox').style.display=entrou?'':'none';
+    const dentro = !!session && !!meuPapel;   /* logado E com perfil ativo */
+
+    /* tela de entrada: some so' quando ha' sessao E papel. Uma conta criada
+       e ainda sem permissao continua parada aqui, porque a API tambem nao
+       lhe devolveria nada. */
+    const gate=$('gate');
+    if(gate){
+      gate.style.display = dentro ? 'none' : 'flex';
+      if(entrou && !meuPapel){
+        $('gateMsg').style.color='#b45309';
+        $('gateMsg').innerHTML='Sua conta ainda não tem permissão de acesso. '+
+          'Peça a um administrador para liberá-la.';
+      }
+    }
+    /* o login antigo da barra some: quem entra ja' passou pela tela */
+    $('loginForm').style.display='none';
+    $('userBox').style.display=dentro?'':'none';
     if(entrou && session.user){
       $('userEmail').textContent = (session.user.email||'logado') +
         (meuPapel ? ' · '+PAPEL_NOME[meuPapel] : ' · sem permissão');
@@ -1305,10 +1371,6 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
       const ve = podeVerBeneficios();
       $('benefLock').style.display = ve?'none':'';
       $('benefForm').style.display = ve?'':'none';
-      $('benefLock').innerHTML = entrou && !meuPapel
-        ? '<b>Sua conta ainda não tem permissão.</b> Peça a um administrador para liberar seu acesso na aba Usuários.'
-        : '<b>Faça login para usar esta aba.</b> Os dados de benefício incluem licença médica '+
-          '(dado sensível) e só ficam disponíveis para usuários autenticados.';
       /* leitor ve' os dados, mas nao importa nem grava */
       ['benefPdfBtn','benefSaveBtn','benefXlsxBtn'].forEach(id=>{
         const b=$(id); if(b && !edita) b.disabled=true;
@@ -1327,8 +1389,12 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     $('loginBtn').addEventListener('click',doLogin);
     $('logoutBtn').addEventListener('click',doLogout);
     $('loginPass').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
+    $('gateBtn').addEventListener('click',doGateLogin);
+    ['gateEmail','gatePass'].forEach(id=>{
+      $(id).addEventListener('keydown',e=>{ if(e.key==='Enter') doGateLogin(); });
+    });
     applyAuthUI();
-    await load();
+    if(meuPapel) await load();   /* sem perfil a API nao devolve nada mesmo */
   }
 
   function dl(name,content,type){
