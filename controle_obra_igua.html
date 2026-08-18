@@ -189,6 +189,14 @@
     border-radius:999px; transition:width .18s ease }
   .benef-prog-txt{ display:flex; justify-content:space-between; gap:10px;
     font-size:.78rem; color:var(--muted); margin-top:6px }
+  .subtabs{ display:flex; gap:6px; margin-bottom:14px; border-bottom:2px solid #e2e8f0 }
+  .subtab{ appearance:none; border:none; background:none; font:inherit; font-size:.9rem;
+    padding:8px 16px; cursor:pointer; color:var(--muted); border-bottom:3px solid transparent;
+    margin-bottom:-2px; font-weight:600; border-radius:6px 6px 0 0 }
+  .subtab:hover{ background:rgba(11,107,79,.06); color:var(--ink) }
+  .subtab.active{ color:var(--axial); border-bottom-color:var(--axial) }
+  .obra-chip{ display:inline-block; font-size:.72rem; padding:2px 9px; border-radius:999px;
+    background:rgba(11,107,79,.10); color:var(--axial-d); font-weight:600; margin-left:8px }
 </style>
 
 <div id="dts-root">
@@ -344,6 +352,19 @@
           (dado sensível) e só ficam disponíveis para usuários autenticados.
         </div>
         <div id="benefForm">
+          <div class="subtabs">
+            <button class="subtab active" data-obra="igua">Recomposição Iguá</button>
+            <button class="subtab" data-obra="outras">Outras Obras</button>
+          </div>
+          <div id="benefOutrasAviso" style="display:none;padding:11px 13px;background:#eff6ff;
+               border:1px solid #93c5fd;border-radius:7px;margin-bottom:14px;font-size:.86rem">
+            <b>Módulo em preparação.</b> O leitor do espelho de ponto das outras obras ainda não
+            foi construído — o formato do relatório é diferente do Iguá. Assim que o modelo do PDF
+            for enviado, esta aba passa a funcionar igual à do Iguá.
+            <div style="margin-top:6px;color:var(--muted)">
+              As apurações das duas obras são gravadas e exportadas separadamente.
+            </div>
+          </div>
           <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
             <label style="display:flex;flex-direction:column;gap:4px">
               <span class="ff-lbl">Mês do benefício</span>
@@ -438,7 +459,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '2.7';
+var APP_VERSION = '2.8';
 var APP_BUILD   = '2026-07-23';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -1208,6 +1229,38 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
    ===================================================================== */
 var benefState = { linhas:[], pendencias:[], comp:null, arquivo:null, inited:false };
 
+/* obra ativa na aba Beneficios. Cada obra tem apuracao e planilha proprias. */
+var BENEF_OBRAS = {
+  igua:   { nome:'Recomposição Iguá', pronta:true,  cruzaCadastro:true  },
+  outras: { nome:'Outras Obras',      pronta:false, cruzaCadastro:false }
+};
+var benefObra = 'igua';
+
+function benefTrocaObra(obra){
+  if(!BENEF_OBRAS[obra] || obra===benefObra) return;
+  if(benefProcessando || benefGravando || benefGerando){
+    benefMsg('Aguarde a operação em andamento terminar antes de trocar de obra.',true);
+    return;
+  }
+  benefObra = obra;
+  var cfg = BENEF_OBRAS[obra];
+  Array.prototype.forEach.call(document.querySelectorAll('.subtab'), function(b){
+    b.classList.toggle('active', b.getAttribute('data-obra')===obra);
+  });
+  $('benefOutrasAviso').style.display = cfg.pronta ? 'none' : '';
+  /* limpa o resultado da obra anterior: os dados nao se misturam */
+  benefState.linhas=[]; benefState.pendencias=[];
+  benefState.comp=null; benefState.arquivo=null;
+  $('benefTbody').innerHTML=''; $('benefTableCard').style.display='none';
+  $('benefAlertas').innerHTML='';
+  $('benefMsg').style.display='none';
+  $('benefSaveBtn').disabled=true; $('benefXlsxBtn').disabled=true;
+  $('benefPdfBtn').disabled = !cfg.pronta;
+  $('benefPdfBtn').textContent = cfg.pronta
+    ? '⬆ Anexar espelho de ponto (PDF)'
+    : '⬆ Anexar espelho (indisponível)';
+}
+
 /* barra de progresso: percentual real, medido nas etapas da importacao.
    benefTick cede o controle ao navegador para a barra realmente repintar. */
 function benefProg(pct, lbl){
@@ -1266,7 +1319,15 @@ function benefInit(){
   $('benefIni').addEventListener('change', benefSyncDatas);
   $('benefIni').addEventListener('input', benefSyncDatas);
   benefSyncDatas();
-  $('benefPdfBtn').addEventListener('click', function(){ $('benefPdfInput').click(); });
+  Array.prototype.forEach.call(document.querySelectorAll('.subtab'), function(b){
+    b.addEventListener('click', function(){ benefTrocaObra(b.getAttribute('data-obra')); });
+  });
+  $('benefPdfBtn').addEventListener('click', function(){
+    if(!BENEF_OBRAS[benefObra].pronta){
+      benefMsg('O leitor do espelho das outras obras ainda não foi construído.',true); return;
+    }
+    $('benefPdfInput').click();
+  });
   $('benefPdfInput').addEventListener('change', function(e){
     if(e.target.files && e.target.files[0]) benefProcessaPdf(e.target.files[0]);
     e.target.value='';
@@ -1501,17 +1562,21 @@ async function benefProcessaPdf(file){
     benefProgFim(); fimProc(); return;
   }
 
-  /* ----- cruzamento com o efetivo ----- */
-  benefProg(93,'Cruzando com o cadastro de colaboradores...');
+  /* ----- cruzamento com o efetivo -----
+     So faz sentido para obras cujo pessoal esta no cadastro do app.
+     Nas demais, o espelho e a unica fonte. */
+  var cruza = BENEF_OBRAS[benefObra].cruzaCadastro;
+  if(cruza){ benefProg(93,'Cruzando com o cadastro de colaboradores...'); }
+  else { benefProg(93,'Consolidando...'); }
   await benefTick();
   var pend=[];
-  var ativos = (typeof rows!=='undefined' ? rows : []).filter(function(r){
+  var ativos = cruza ? (typeof rows!=='undefined' ? rows : []).filter(function(r){
     return !isDesligado(r);
-  });
+  }) : [];
   var porMat={}; ativos.forEach(function(r){ if(r.codigo) porMat[String(r.codigo).padStart(6,'0')]=r; });
 
   linhas.forEach(function(l){
-    if(!porMat[l.matricula]){
+    if(cruza && !porMat[l.matricula]){
       pend.push({matricula:l.matricula, nome:l.nome, tipo:'SEM_CADASTRO',
         descricao:'Consta no espelho de ponto e foi incluído normalmente na apuração, mas não tem cadastro ativo no efetivo.',
         acao_sugerida:'Conferir se falta cadastrar no app ou se já foi desligado depois deste período.'});
@@ -1555,7 +1620,7 @@ async function benefProcessaPdf(file){
   benefState.arquivo={nome:file.name, hash:hash, emitido:emitido};
   benefState.comp={referencia:$('benefRef').value+'-01', periodo_inicio:ini,
     periodo_fim:fim, base_dias_uteis:base, limiar_extra_min:limiar,
-    feriados:Object.keys(feriados).sort().join(',')};
+    feriados:Object.keys(feriados).sort().join(','), obra:benefObra};
 
   benefProg(98,'Montando a tabela...');
   await benefTick();
@@ -1617,7 +1682,8 @@ async function benefGravar(){
   try{
     var jaTem = await sb.from('beneficio_competencia')
       .select('id,arquivo_nome,criado_em,criado_por')
-      .eq('referencia', benefState.comp.referencia).maybeSingle();
+      .eq('referencia', benefState.comp.referencia)
+      .eq('obra', benefObra).maybeSingle();
     if(jaTem.data){
       var q = jaTem.data.criado_em ? new Date(jaTem.data.criado_em).toLocaleString('pt-BR') : 'data desconhecida';
       var msg = 'Já existe uma apuração gravada para '+
@@ -1640,7 +1706,8 @@ async function benefGravar(){
       arquivo_emitido: benefState.arquivo.emitido,
       criado_por: (session && session.user && session.user.email) || null
     });
-    var r1 = await sb.from('beneficio_competencia').upsert(comp,{onConflict:'referencia'}).select().single();
+    var r1 = await sb.from('beneficio_competencia')
+      .upsert(comp,{onConflict:'referencia,obra'}).select().single();
     if(r1.error) throw r1.error;
     var cid = r1.data.id;
 
@@ -1678,7 +1745,7 @@ async function benefGravar(){
       var r4 = await sb.from('beneficio_pendencia').insert(pd);
       if(r4.error) throw r4.error;
     }
-    logHist('Benefícios gravados', '', 'Competência '+benefState.comp.referencia+
+    logHist('Benefícios gravados', '', '['+BENEF_OBRAS[benefObra].nome+'] Competência '+benefState.comp.referencia+
       ' · '+benefState.linhas.length+' colaboradores · arquivo '+benefState.arquivo.nome);
     benefMsg('✓ Competência gravada na nuvem ('+benefState.linhas.length+' linhas, '+ocs.length+' ocorrências).');
     showFlash();
@@ -1729,7 +1796,8 @@ async function benefGerarXlsx(){
 
   /* ================= ABA 1: CONTROLE ================= */
   var ws=wb.addWorksheet('CONTROLE',{views:[{state:'frozen',xSplit:3,ySplit:6}]});
-  ws.getCell('A1').value='CONTROLE DE BENEFÍCIOS – RECOMPOSIÇÃO IGUÁ';
+  ws.getCell('A1').value='CONTROLE DE BENEFÍCIOS – '+
+    ((BENEF_OBRAS[c.obra||'igua']||{}).nome||'RECOMPOSIÇÃO IGUÁ').toUpperCase();
   ws.getCell('A1').font=ARI(12,true);
   ws.getCell('A2').value={formula:'"Apuração do ponto: "&DAY($C$2)&"/"&MONTH($C$2)&"/"&YEAR($C$2)'+
     '&" a "&DAY(EDATE($C$2,1)-1)&"/"&MONTH(EDATE($C$2,1)-1)&"/"&YEAR(EDATE($C$2,1)-1)'+
@@ -2021,7 +2089,8 @@ async function benefGerarXlsx(){
   benefGerando=false; benefProgFim();
   if(btnX){ btnX.disabled=false; btnX.textContent=txtX||'⬇ Baixar .xlsx (4 abas)'; }
   var blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-  var nm='CONTROLE_BENEFICIOS_'+mesBenef+'_'+c.referencia.slice(0,4)+'.xlsx';
+  var sufObra = (c.obra && c.obra!=='igua') ? '_'+c.obra.toUpperCase() : '';
+  var nm='CONTROLE_BENEFICIOS'+sufObra+'_'+mesBenef+'_'+c.referencia.slice(0,4)+'.xlsx';
   var a=document.createElement('a');
   a.href=URL.createObjectURL(blob); a.download=nm;
   document.body.appendChild(a); a.click();
