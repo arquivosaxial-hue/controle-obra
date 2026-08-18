@@ -228,6 +228,38 @@
     </div>
   </div>
 
+  <!-- Troca da propria senha. Nao depende de e-mail, entao funciona mesmo
+       sem o SMTP proprio configurado. -->
+  <div id="pwdBox" style="display:none;position:fixed;inset:0;z-index:9998;
+       background:rgba(15,23,42,.55);align-items:center;justify-content:center;padding:20px">
+    <div style="background:#fff;border-radius:12px;padding:28px;max-width:380px;width:100%">
+      <div style="font-size:1.1rem;font-weight:800;color:#0b6b4f;margin-bottom:16px">
+        Alterar minha senha</div>
+      <label style="display:block;font-size:.8rem;font-weight:700;color:#475569;margin-bottom:4px">
+        Senha atual</label>
+      <input id="pwdAtual" type="password" autocomplete="current-password"
+             style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:7px;
+                    margin-bottom:12px;box-sizing:border-box">
+      <label style="display:block;font-size:.8rem;font-weight:700;color:#475569;margin-bottom:4px">
+        Nova senha</label>
+      <input id="pwdNova" type="password" autocomplete="new-password"
+             style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:7px;
+                    margin-bottom:12px;box-sizing:border-box">
+      <label style="display:block;font-size:.8rem;font-weight:700;color:#475569;margin-bottom:4px">
+        Repita a nova senha</label>
+      <input id="pwdNova2" type="password" autocomplete="new-password"
+             style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:7px;
+                    margin-bottom:6px;box-sizing:border-box">
+      <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">
+        Mínimo de 8 caracteres.</div>
+      <div id="pwdMsg" style="font-size:.86rem;min-height:20px;margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-pri" id="pwdSalvar" style="flex:1">Salvar</button>
+        <button class="btn btn-ghost" id="pwdFechar">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
   <header class="top">
     <div class="wrap">
       <div class="brand">
@@ -253,6 +285,7 @@
       </div>
       <div id="userBox" class="user-box" style="display:none">
         <span class="dot"></span> Editando como <b id="userEmail"></b>
+        <button class="btn btn-ghost" id="pwdAbrir">Alterar senha</button>
         <button class="btn btn-ghost" id="logoutBtn">Sair</button>
       </div>
       <span id="roBadge" class="ro-badge">Somente leitura</span>
@@ -547,7 +580,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.3';
+var APP_VERSION = '3.4';
 var APP_BUILD   = '2026-07-23';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -1320,6 +1353,41 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     }finally{ btn.disabled=false; btn.textContent='Entrar'; }
   }
 
+  /* ---- troca da propria senha ----
+     Confere a senha atual antes de trocar. O Supabase nao exige isso, mas
+     sem a conferencia bastaria alguem sentar na maquina com a sessao aberta
+     para assumir a conta. */
+  async function doTrocarSenha(){
+    const msg=$('pwdMsg'), btn=$('pwdSalvar');
+    const atual=$('pwdAtual').value, nova=$('pwdNova').value, nova2=$('pwdNova2').value;
+    const erro=t=>{ msg.style.color='#b23'; msg.textContent=t; };
+    if(!atual||!nova||!nova2) return erro('Preencha os três campos.');
+    if(nova.length<8)        return erro('A nova senha precisa ter ao menos 8 caracteres.');
+    if(nova!==nova2)         return erro('A nova senha e a repetição não são iguais.');
+    if(nova===atual)         return erro('A nova senha é igual à atual.');
+    if(!session||!session.user) return erro('Sessão expirada. Entre novamente.');
+
+    btn.disabled=true; btn.textContent='Salvando...';
+    msg.style.color='#64748b'; msg.textContent='Verificando a senha atual...';
+    try{
+      const { error: e1 } = await sb.auth.signInWithPassword({
+        email: session.user.email, password: atual });
+      if(e1) return erro('A senha atual está incorreta.');
+
+      const { error: e2 } = await sb.auth.updateUser({ password: nova });
+      if(e2) return erro('Não consegui alterar: '+e2.message);
+
+      msg.style.color='#0b6b4f'; msg.textContent='✓ Senha alterada.';
+      logHist('alterou a própria senha','','');
+      setTimeout(function(){
+        $('pwdBox').style.display='none';
+        ['pwdAtual','pwdNova','pwdNova2'].forEach(function(i){ $(i).value=''; });
+        msg.textContent='';
+      },1200);
+    }catch(e){ erro('Erro: '+e.message); }
+    finally{ btn.disabled=false; btn.textContent='Salvar'; }
+  }
+
   async function doLogout(){
     if(!sb) return;
     await sb.auth.signOut(); session=null; meuPapel=null;
@@ -1393,6 +1461,14 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     ['gateEmail','gatePass'].forEach(id=>{
       $(id).addEventListener('keydown',e=>{ if(e.key==='Enter') doGateLogin(); });
     });
+    $('pwdAbrir').addEventListener('click',()=>{
+      $('pwdMsg').textContent='';
+      ['pwdAtual','pwdNova','pwdNova2'].forEach(i=>{ $(i).value=''; });
+      $('pwdBox').style.display='flex'; $('pwdAtual').focus();
+    });
+    $('pwdFechar').addEventListener('click',()=>{ $('pwdBox').style.display='none'; });
+    $('pwdSalvar').addEventListener('click',doTrocarSenha);
+    $('pwdNova2').addEventListener('keydown',e=>{ if(e.key==='Enter') doTrocarSenha(); });
     applyAuthUI();
     if(meuPapel) await load();   /* sem perfil a API nao devolve nada mesmo */
   }
