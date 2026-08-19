@@ -94,6 +94,9 @@
   tr.fin-total td{ background:#efe9da; font-weight:800; border-top:2px solid var(--line); font-size:.92rem }
   tr.fin-total td.num{ color:var(--axial-d) }
   #view-financeiro .nm{ font-weight:700 }
+  #view-financeiro .cpf-cell{ font-variant-numeric:tabular-nums; white-space:nowrap; color:#475569 }
+  #view-financeiro.nocpf .cpf-cell,
+  #view-financeiro.nocpf thead th[data-sort="cpf"]{ display:none }
   .cell-input.dataprev:hover{ border-color:var(--amber) }
   .cell-input.dataprev:focus{ background:#fff; border-color:var(--amber); box-shadow:0 0 0 3px rgba(198,112,26,.12) }
   tr.inativo td .cell-input{ color:#9a9a9a; text-decoration:line-through }
@@ -149,6 +152,20 @@
 
   footer.ft{ text-align:center; margin-top:30px; font-size:.74rem; color:var(--muted) }
   .hint{ font-size:.74rem; color:var(--muted); margin:8px 2px 0 }
+
+  /* ---- aba Autorização de Entrada/Saída ---- */
+  .aut-grid{ display:grid; grid-template-columns:repeat(2,minmax(210px,1fr)); gap:12px 16px; margin-bottom:6px }
+  .aut-f{ display:flex; flex-direction:column; gap:4px; font-size:.82rem }
+  .aut-f > span{ font-weight:600; color:#334155 }
+  .aut-f input, .aut-f select{ padding:8px 9px; border:1px solid #cbd5e1; border-radius:7px;
+    font:inherit; font-size:.86rem; box-sizing:border-box; width:100% }
+  .aut-blk{ margin:14px 0 }
+  .aut-lbl{ font-weight:600; color:#334155; font-size:.82rem; margin-bottom:5px }
+  .aut-opts{ display:flex; flex-wrap:wrap; gap:6px 18px; font-size:.85rem }
+  .aut-opts label{ display:inline-flex; align-items:center; gap:5px; cursor:pointer }
+  .aut-blk textarea{ width:100%; margin-top:7px; padding:8px 9px; border:1px solid #cbd5e1;
+    border-radius:7px; font:inherit; font-size:.86rem; box-sizing:border-box; resize:vertical }
+  @media(max-width:640px){ .aut-grid{ grid-template-columns:1fr } }
   .importmsg{ margin:4px 0 0; padding:11px 14px; border-radius:10px; font-size:.84rem; line-height:1.5;
     background:#dceee6; border:1px solid #b6dccb; color:var(--axial-d) }
   .importmsg.err{ background:#f6d6d3; border-color:#e8b4af; color:var(--red) }
@@ -311,6 +328,7 @@
       <button class="tab" data-tab="financeiro">Financeiro</button>
       <button class="tab" data-tab="resumo">Resumo</button>
       <button class="tab" data-tab="beneficios">Benefícios (VR/VA)</button>
+      <button class="tab" data-tab="autoriz">Autorização E/S</button>
       <button class="tab" data-tab="historico">Histórico</button>
       <button class="tab" id="tabUsuarios" data-tab="usuarios" style="display:none">Usuários</button>
     </div>
@@ -359,16 +377,17 @@
           <thead><tr>
             <th data-sort="codigo">Código</th>
             <th data-sort="nome">Nome</th>
+            <th data-sort="cpf">CPF</th>
             <th data-sort="funcao">Função</th>
             <th data-sort="tempo">Tempo de casa</th>
             <th data-sort="status">Situação</th>
             <th data-sort="salario" class="num">Salário (R$)</th>
           </tr></thead>
           <tbody id="tbodyFin"></tbody>
-          <tfoot><tr class="fin-total"><td colspan="5">Total da folha (ativos)</td><td class="num" id="fin-total">R$ 0,00</td></tr></tfoot>
+          <tfoot><tr class="fin-total"><td colspan="6" id="fin-total-lbl">Total da folha (ativos)</td><td class="num" id="fin-total">R$ 0,00</td></tr></tfoot>
         </table>
       </div>
-      <p class="hint">✎ Edite o salário aqui — os valores são exibidos com duas casas decimais. Colaboradores desligados não entram no total da folha.</p>
+      <p class="hint">✎ Edite o salário aqui — os valores são exibidos com duas casas decimais. O <b>CPF</b> vem da planilha de efetivo e não é editável em tela; para corrigir, reimporte ou peça o SQL. Colaboradores desligados não entram no total da folha.</p>
     </div>
 
     <div id="view-exames" style="display:none">
@@ -502,6 +521,97 @@
       </p>
     </div>
 
+    <div id="view-autoriz" style="display:none">
+      <div class="card" style="padding:16px;max-width:960px">
+        <div style="font-weight:700;margin-bottom:4px">Autorização de Entrada / Saída</div>
+        <div style="color:var(--muted);font-size:.84rem;margin-bottom:14px">
+          Escolha o colaborador e o motivo. O nome e a função vêm do cadastro.
+          O formulário sai pronto para imprimir ou salvar em PDF, ocupando meia folha A4.
+        </div>
+
+        <div class="aut-grid">
+          <label class="aut-f" style="grid-column:span 2">
+            <span>Colaborador</span>
+            <select id="autCol"></select>
+          </label>
+          <label class="aut-f">
+            <span>Função</span>
+            <input type="text" id="autFuncao" placeholder="preenchida pelo cadastro">
+          </label>
+          <label class="aut-f">
+            <span>Data</span>
+            <input type="date" id="autData">
+          </label>
+          <label class="aut-f">
+            <span>Setor</span>
+            <input type="text" id="autSetor" value="OBRA">
+          </label>
+          <label class="aut-f">
+            <span>Solicitado por</span>
+            <input type="text" id="autSolic" placeholder="quem pediu (opcional)">
+          </label>
+        </div>
+
+        <div class="aut-blk">
+          <div class="aut-lbl">Descrição da entrada / saída</div>
+          <div class="aut-opts">
+            <label><input type="radio" name="autDesc" value="entrada" checked> Esqueceu de bater o ponto na <b>entrada</b></label>
+            <label><input type="radio" name="autDesc" value="saida"> Esqueceu de bater o ponto na <b>saída</b></label>
+            <label><input type="radio" name="autDesc" value="outro"> Outro (escrever abaixo)</label>
+          </div>
+          <textarea id="autDescTxt" rows="2"></textarea>
+        </div>
+
+        <div class="aut-blk">
+          <div class="aut-lbl">Motivo</div>
+          <div class="aut-opts">
+            <label><input type="radio" name="autMotivo" value="" checked> Não marcar</label>
+            <label><input type="radio" name="autMotivo" value="servico"> A serviço da Construtora Axial</label>
+            <label><input type="radio" name="autMotivo" value="particular"> Particular</label>
+            <label><input type="radio" name="autMotivo" value="medico"> Médico</label>
+          </div>
+        </div>
+
+        <div class="aut-blk">
+          <div class="aut-lbl">Justificado a</div>
+          <div class="aut-opts">
+            <label><input type="radio" name="autJust" value="semreg" checked> Sem registro no ponto</label>
+            <label><input type="radio" name="autJust" value="abonar"> Abonar</label>
+            <label><input type="radio" name="autJust" value="descontar"> Descontar</label>
+            <label><input type="radio" name="autJust" value="compensar"> Compensar</label>
+            <label><input type="radio" name="autJust" value="aguardar"> Aguardar</label>
+            <label><input type="radio" name="autJust" value=""> Não marcar</label>
+          </div>
+        </div>
+
+        <div class="aut-grid">
+          <label class="aut-f">
+            <span>Horário de saída</span>
+            <input type="time" id="autHrSaida">
+          </label>
+          <label class="aut-f">
+            <span>Horário de chegada</span>
+            <input type="time" id="autHrCheg">
+          </label>
+          <div class="aut-f">
+            <span>Previsto retorno à empresa</span>
+            <div class="aut-opts" style="margin-top:2px">
+              <label><input type="radio" name="autRet" value="" checked> Não marcar</label>
+              <label><input type="radio" name="autRet" value="sim"> Sim</label>
+              <label><input type="radio" name="autRet" value="nao"> Não</label>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;align-items:center">
+          <button class="btn btn-amber" id="autGerar">🖨 Gerar formulário</button>
+          <button class="btn btn-ghost" id="autLimpar">Limpar campos</button>
+          <span id="autMsg" style="font-size:.85rem"></span>
+        </div>
+      </div>
+      <p class="hint">Nada é gravado no banco — o formulário é gerado na hora, no seu navegador. Cada folha traz um formulário, ocupando a metade de cima da página.</p>
+    </div>
+
     <div id="view-historico" style="display:none">
       <div class="ferias-filter">
         <button class="btn btn-ghost" id="histReload">↻ Atualizar histórico</button>
@@ -580,8 +690,8 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.4';
-var APP_BUILD   = '2026-07-23';
+var APP_VERSION = '3.7';
+var APP_BUILD   = '2026-08-19';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
    Você edita config.js UMA vez; ao trocar este HTML por uma versão nova,
@@ -635,8 +745,19 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
   function fmtDiaSemana(s){ const d=parseDate(s); if(!d) return ''; const dia=d.toLocaleDateString('pt-BR',{weekday:'long'}); return dia.charAt(0).toUpperCase()+dia.slice(1)+', '+d.toLocaleDateString('pt-BR'); }
   function daysTo(s){ const d=parseDate(s); if(!d) return null; return Math.round((d-today)/864e5); }
   function fmtMoney(v){ if(v==null||v==='') return '—'; return Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  /* CPF: mostra 000.000.000-00. Se vier com tamanho estranho, devolve como esta —
+     melhor exibir o valor cru do que esconder um cadastro torto. */
+  function fmtCPF(v){
+    if(v==null||v==='') return '—';
+    const d=String(v).replace(/\D/g,'');
+    if(d.length!==11) return String(v);
+    return d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6,9)+'-'+d.slice(9);
+  }
 
-  const COLS=['id','codigo','nome','funcao','admissao','cpf','salario','vctoFerias','concederAte','dataPrevista','ultimaFerias','aso','status'];
+  /* O CPF saiu desta lista: ele mora na tabela colaboradores_cpf, que so
+     administrador consegue ler. Continua existindo em memoria (r.cpf), mas
+     nao vai mais no upsert de colaboradores. */
+  const COLS=['id','codigo','nome','funcao','admissao','salario','vctoFerias','concederAte','dataPrevista','ultimaFerias','aso','status'];
   function toDb(r){ const o={}; COLS.forEach(c=>{ let v=r[c]; if(v==='') v=null; o[c]=v; }); if(!o.status) o.status='ativo'; return o; }
   function fromDb(r){ const o={}; COLS.forEach(c=>o[c]=r[c]); return o; }
 
@@ -669,8 +790,32 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
         rows=data.map(fromDb);
         banner('', false);
       }
+      await loadCPF();
     }catch(e){ banner('Erro ao carregar dados: '+e.message, true); }
     render();
+  }
+
+  /* ---- CPF: tabela separada, leitura so para administrador ----
+     A RLS de colaboradores_cpf devolve vazio para leitor e importador.
+     Isso nao e' erro: e' o comportamento esperado. */
+  const CPF_TABLE='colaboradores_cpf';
+  async function loadCPF(){
+    rows.forEach(r=>{ r.cpf=''; });
+    if(!sb || !isAdmin()) return;
+    try{
+      const { data, error } = await sb.from(CPF_TABLE).select('colaborador_id,cpf');
+      if(error) throw error;
+      const m={}; (data||[]).forEach(x=>{ m[x.colaborador_id]=x.cpf; });
+      rows.forEach(r=>{ if(m[r.id]!=null) r.cpf=m[r.id]; });
+    }catch(e){ /* sem CPF a tela continua inteira; nao vale travar o app por isso */ }
+  }
+  async function saveCPF(){
+    if(!sb || !canEdit()) return;
+    const lote=rows.filter(r=>r.cpf!=null && String(r.cpf).trim()!=='')
+      .map(r=>({ colaborador_id:r.id, cpf:String(r.cpf).trim(), atualizado_em:new Date().toISOString() }));
+    if(!lote.length) return;
+    try{ await sb.from(CPF_TABLE).upsert(lote); }
+    catch(e){ /* o efetivo ja foi salvo; o CPF pode ser reenviado numa proxima importacao */ }
   }
 
   let saveT;
@@ -761,7 +906,12 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
   function render(){
     const q=($('search').value||'').toLowerCase().trim();
     let list=rows.slice();
-    if(q) list=list.filter(r=>[r.nome,r.funcao,r.codigo].some(v=>(v||'').toString().toLowerCase().includes(q)));
+    if(q) list=list.filter(r=>{
+      if([r.nome,r.funcao,r.codigo].some(v=>(v||'').toString().toLowerCase().includes(q))) return true;
+      /* busca por CPF: compara so os digitos, para achar tanto "12345678901" quanto "123.456" */
+      const qd=q.replace(/\D/g,'');
+      return qd.length>=3 && String(r.cpf||'').replace(/\D/g,'').includes(qd);
+    });
     if(sitFilter!=='todos') list=list.filter(r=>sitKey(r)===sitFilter);
     list.sort((a,b)=>{
       let x,y;
@@ -810,8 +960,14 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     });
 
     // financeiro view
+    /* coluna CPF so aparece para administrador. Com ela escondida o rodape
+       precisa perder uma casa no colspan, senao o total sai da tabela. */
+    const vf=$('view-financeiro');
+    if(vf) vf.classList.toggle('nocpf', !isAdmin());
+    const ftl=$('fin-total-lbl');
+    if(ftl) ftl.colSpan = isAdmin()?6:5;
     const fb=$('tbodyFin'); fb.innerHTML='';
-    if(!list.length){ fb.innerHTML='<tr><td colspan="5" class="empty">Nenhum colaborador encontrado.</td></tr>'; }
+    if(!list.length){ fb.innerHTML='<tr><td colspan="7" class="empty">Nenhum colaborador encontrado.</td></tr>'; }
     list.forEach(r=>{
       const sk=sitKey(r);
       const tr=document.createElement('tr'); tr.dataset.id=r.id;
@@ -820,6 +976,7 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
       tr.innerHTML=
         '<td>'+esc(r.codigo||'—')+'</td>'+
         '<td class="nm">'+esc(r.nome)+'</td>'+
+        '<td class="cpf-cell">'+esc(fmtCPF(r.cpf))+'</td>'+
         '<td>'+esc(r.funcao||'—')+'</td>'+
         '<td class="tempo-cell">'+(tempoCasa(r)||'—')+'</td>'+
         '<td><span class="pill '+pillCls+'">'+SIT_META[sk].label+'</span></td>'+
@@ -988,11 +1145,12 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     t.addEventListener('click',()=>{
       document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
       t.classList.add('active'); tab=t.dataset.tab;
-      ['todos','ferias','exames','financeiro','resumo','beneficios','historico','usuarios'].forEach(v=>{
+      ['todos','ferias','exames','financeiro','resumo','beneficios','autoriz','historico','usuarios'].forEach(v=>{
         const el=$('view-'+v); if(el) el.style.display=(tab===v)?'':'none';
       });
       if(tab==='historico') loadHist();
       if(tab==='beneficios') benefInit();
+      if(tab==='autoriz') autInit();
       if(tab==='usuarios') usrInit();
     });
   });
@@ -1303,6 +1461,7 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     try{
       const { error } = await sb.from(TABLE).upsert(rows.map(toDb));
       if(error) throw error;
+      await saveCPF();   /* o CPF vai para a tabela protegida, nunca para colaboradores */
       showFlash();
       logHist('importou planilha', null, u+' atualizado(s), '+a+' adicionado(s)'+(r?', '+r+' reativado(s)':'')+(desligados.length?', '+desligados.length+' desligado(s)':''));
       desligados.forEach(n=>logHist('situação', n, 'Ativo → Desligado (efetivo importado)'));
@@ -2614,6 +2773,236 @@ async function benefGerarXlsx(){
   document.body.appendChild(a); a.click();
   setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },1000);
   benefMsg('✓ Planilha gerada: '+nm);
+}
+
+/* ===================================================================
+   AUTORIZACAO DE ENTRADA / SAIDA  (Reg. 6.2.1 09)
+   Gera o formulario pronto para impressao. Nao grava nada no banco.
+   ATENCAO: este bloco precisa ficar DENTRO do IIFE do app, senao
+   rows/$ e os demais globais quebram silenciosamente.
+   =================================================================== */
+var autPronto=false;
+
+function autInit(){
+  autPreencherLista();
+  if(autPronto) return;
+  autPronto=true;
+
+  var d=$('autData');
+  if(d && !d.value) d.value=autHojeISO();
+
+  var sel=$('autCol');
+  if(sel) sel.addEventListener('change',autAplicarColab);
+
+  Array.prototype.forEach.call(
+    document.querySelectorAll('input[name="autDesc"]'),
+    function(r){ r.addEventListener('change',autAplicarDesc); }
+  );
+  autAplicarDesc();
+
+  var g=$('autGerar');   if(g) g.addEventListener('click',autGerar);
+  var l=$('autLimpar');  if(l) l.addEventListener('click',autLimpar);
+}
+
+/* data local — nunca usar toISOString aqui (desloca para UTC) */
+function autHojeISO(){
+  var d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function autDataBR(iso){
+  if(!iso) return '';
+  var p=String(iso).split('-');
+  if(p.length<3) return '';
+  return p[2]+'/'+p[1]+'/'+p[0];
+}
+
+function autPreencherLista(){
+  var sel=$('autCol'); if(!sel) return;
+  var anterior=sel.value;
+  var lista=rows.filter(function(r){ return r.nome && sitKey(r)!=='desligado'; })
+                .sort(function(a,b){ return a.nome.localeCompare(b.nome,'pt-BR'); });
+  var html='<option value="">— escolha o colaborador —</option>';
+  lista.forEach(function(r){
+    var et=r.nome+(sitKey(r)==='afastado'?'  (afastado)':'');
+    html+='<option value="'+r.id+'">'+autEsc(et)+'</option>';
+  });
+  sel.innerHTML=html;
+  if(anterior) sel.value=anterior;
+}
+
+function autAplicarColab(){
+  var sel=$('autCol'); if(!sel) return;
+  var r=rows.filter(function(x){ return String(x.id)===String(sel.value); })[0];
+  var f=$('autFuncao');
+  if(f) f.value = r ? (r.funcao||'') : '';
+}
+
+function autAplicarDesc(){
+  var m=document.querySelector('input[name="autDesc"]:checked');
+  var v=m?m.value:'entrada';
+  var t=$('autDescTxt'); if(!t) return;
+  if(v==='entrada'){ t.value='Esqueceu de bater o ponto na entrada.'; t.readOnly=false; }
+  else if(v==='saida'){ t.value='Esqueceu de bater o ponto na saída.'; t.readOnly=false; }
+  else { if(/^Esqueceu de bater o ponto/.test(t.value)) t.value=''; t.readOnly=false; t.focus(); }
+}
+
+function autLimpar(){
+  var sel=$('autCol'); if(sel) sel.value='';
+  ['autFuncao','autSolic','autHrSaida','autHrCheg'].forEach(function(id){
+    var e=$(id); if(e) e.value='';
+  });
+  var st=$('autSetor'); if(st) st.value='OBRA';
+  var d=$('autData'); if(d) d.value=autHojeISO();
+  var e1=document.querySelector('input[name="autDesc"][value="entrada"]'); if(e1) e1.checked=true;
+  var m1=document.querySelector('input[name="autMotivo"][value=""]');      if(m1) m1.checked=true;
+  var j1=document.querySelector('input[name="autJust"][value="semreg"]');  if(j1) j1.checked=true;
+  var r1=document.querySelector('input[name="autRet"][value=""]');         if(r1) r1.checked=true;
+  autAplicarDesc();
+  autMsg('');
+}
+
+function autMsg(txt,erro){
+  var m=$('autMsg'); if(!m) return;
+  m.textContent=txt||'';
+  m.style.color = erro ? '#b91c1c' : 'var(--muted)';
+}
+
+function autEsc(s){
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function autVal(nome){
+  var e=document.querySelector('input[name="'+nome+'"]:checked');
+  return e?e.value:'';
+}
+/* caixinha do formulario: [ X ] ou [   ] */
+function autBox(marcado){
+  return '<span class="bx">['+(marcado?'<b>X</b>':'&nbsp;&nbsp;')+']</span>';
+}
+
+function autGerar(){
+  var sel=$('autCol');
+  var r=sel ? rows.filter(function(x){ return String(x.id)===String(sel.value); })[0] : null;
+  if(!r){ autMsg('Escolha o colaborador antes de gerar.',true); return; }
+
+  var nome   = r.nome||'';
+  var funcao = ($('autFuncao')&&$('autFuncao').value.trim()) || r.funcao || '';
+  var setor  = ($('autSetor') && $('autSetor').value.trim()) || '';
+  var solic  = ($('autSolic') && $('autSolic').value.trim()) || '';
+  var dataBR = autDataBR($('autData')?$('autData').value:'');
+  var desc   = ($('autDescTxt')&&$('autDescTxt').value.trim()) || '';
+  var hSaida = ($('autHrSaida')&&$('autHrSaida').value) || '';
+  var hCheg  = ($('autHrCheg') &&$('autHrCheg').value)  || '';
+  var mot    = autVal('autMotivo');
+  var just   = autVal('autJust');
+  var ret    = autVal('autRet');
+
+  /* o logo ja esta no cabecalho da pagina — reaproveitado, sem duplicar o base64 */
+  var img=document.querySelector('.logo img');
+  var logo = img ? img.src : '';
+
+  var css =
+    '@page{size:A4;margin:10mm}'+
+    'body{font-family:Arial,Helvetica,sans-serif;color:#000;font-size:11px;margin:0}'+
+    '.np{margin:10px 0 14px;text-align:center}'+
+    '.np button{padding:9px 20px;font-size:13px;cursor:pointer;background:#0b6b4f;color:#fff;'+
+      'border:none;border-radius:6px;font-weight:bold}'+
+    '@media print{.np{display:none}}'+
+    '.form{border:1.5px solid #000;width:100%;box-sizing:border-box}'+
+    'table{width:100%;border-collapse:collapse;table-layout:fixed}'+
+    'td{border:1px solid #000;padding:3px 6px;vertical-align:top;word-wrap:break-word}'+
+    '.hd td{padding:0}'+
+    '.lg{text-align:center;vertical-align:middle;padding:6px 0}'+
+    '.lg img{width:135px}'+
+    '.ti{text-align:center;vertical-align:middle;font-weight:bold;font-size:15px;letter-spacing:.5px}'+
+    '.rg{text-align:center;vertical-align:middle;font-size:10px}'+
+    '.dt{text-align:center;font-size:12px;font-weight:bold;padding:4px}'+
+    '.k{font-weight:bold}'+
+    '.v{font-weight:normal}'+
+    '.bx{font-family:"Courier New",monospace;letter-spacing:0}'+
+    '.h{height:15px}'+
+    '.notas td{border:none;border-top:1px solid #000;font-size:9.5px;padding:2px 6px}'+
+    '.sig td{height:46px;font-size:10px}'+
+    '.rod{margin-top:4px;font-size:8.5px;color:#555;text-align:right}';
+
+  var h='';
+  /* larguras fixas: logo | corpo | direita. Sem isso o "Solicitado por"
+     quebra em duas linhas quando o nome e' comprido. */
+  h+='<div class="form"><table>'+
+     '<colgroup><col style="width:29%"><col style="width:42%"><col style="width:29%"></colgroup>';
+
+  /* cabecalho */
+  h+='<tr class="hd">'+
+       '<td class="lg" rowspan="2">'+(logo?'<img src="'+logo+'" alt="Construtora Axial">':'AXIAL')+'</td>'+
+       '<td class="ti">ENTRADA / SAÍDA</td>'+
+       '<td class="rg" rowspan="2">Reg. 6.2.1 09</td>'+
+     '</tr>';
+  h+='<tr class="hd"><td class="dt">Data: '+autEsc(dataBR)+'</td></tr>';
+
+  /* identificacao */
+  h+='<tr>'+
+       '<td colspan="2"><span class="k">Funcionário:</span> <span class="v">'+autEsc(nome)+'</span></td>'+
+       '<td><span class="k">Função:</span> <span class="v">'+autEsc(funcao)+'</span></td>'+
+     '</tr>';
+  h+='<tr>'+
+       '<td colspan="2"><span class="k">Setor:</span> <span class="v">'+autEsc(setor)+'</span></td>'+
+       '<td><span class="k">Solicitado por:</span> <span class="v">'+autEsc(solic)+'</span></td>'+
+     '</tr>';
+
+  /* motivo */
+  h+='<tr><td colspan="3"><span class="k">Motivo:</span>&nbsp;&nbsp;'+
+       autBox(mot==='servico')+' A serviço da Construtora Axial&nbsp;&nbsp;&nbsp;'+
+       autBox(mot==='particular')+' Particular&nbsp;&nbsp;&nbsp;'+
+       autBox(mot==='medico')+' Médico'+
+     '</td></tr>';
+
+  /* descricao — uma linha escrita e duas em branco para completar a mao */
+  h+='<tr><td colspan="3"><span class="k">Descrição da Entrada / Saída:</span> '+
+       '<span class="v">'+autEsc(desc)+'</span></td></tr>';
+  h+='<tr><td colspan="3" class="h">&nbsp;</td></tr>';
+  h+='<tr><td colspan="3" class="h">&nbsp;</td></tr>';
+
+  /* horarios + retorno */
+  h+='<tr>'+
+       '<td colspan="2"><span class="k">Horário de Saída:</span> '+
+         '<span class="bx">[ '+autEsc(hSaida||'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')+' ]</span></td>'+
+       '<td rowspan="2"><span class="k">Previsto retorno à empresa:</span><br>'+
+         autBox(ret==='sim')+' Sim&nbsp;&nbsp;&nbsp;'+autBox(ret==='nao')+' Não</td>'+
+     '</tr>';
+  h+='<tr>'+
+       '<td colspan="2"><span class="k">Horário de Chegada:</span> '+
+         '<span class="bx">[ '+autEsc(hCheg||'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')+' ]</span></td>'+
+     '</tr>';
+
+  /* justificado a */
+  h+='<tr><td colspan="3"><span class="k">Justificado a:</span>&nbsp;&nbsp;'+
+       autBox(just==='semreg')+' Sem registro no ponto&nbsp;&nbsp;'+
+       autBox(just==='abonar')+' Abonar&nbsp;&nbsp;'+
+       autBox(just==='descontar')+' Descontar&nbsp;&nbsp;'+
+       autBox(just==='compensar')+' Compensar&nbsp;&nbsp;'+
+       autBox(just==='aguardar')+' Aguardar'+
+     '</td></tr>';
+
+  /* notas do formulario */
+  h+='</table><table class="notas">'+
+     '<tr><td>1 - O funcionário deverá marcar seu cartão na saída e retorno.</td></tr>'+
+     '<tr><td>2 - Aguardando documento para abonar, descontar ou compensar.</td></tr>'+
+     '<tr><td>3 - Só poderá sair mediante a entrega deste, devidamente assinada pelo responsável.</td></tr>'+
+     '</table><table class="sig">'+
+     '<tr><td style="width:50%">Solicitante:</td><td>Chefia Imediata:</td></tr>'+
+     '</table></div>';
+
+  h+='<div class="rod">Emitido em '+autEsc(new Date().toLocaleDateString('pt-BR'))+'</div>';
+
+  var titulo='Autorizacao E-S - '+nome;
+  var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">'+
+    '<title>'+autEsc(titulo)+'</title><style>'+css+'</style></head><body>'+
+    '<div class="np"><button onclick="window.print()">🖨 Imprimir / Salvar PDF</button></div>'+
+    h+'</body></html>';
+
+  var w=window.open('','_blank');
+  if(w){ w.document.write(html); w.document.close(); autMsg('✓ Formulário gerado em outra aba.'); }
+  else { dl(titulo+'.html',html,'text/html'); autMsg('✓ Formulário baixado (o navegador bloqueou a nova aba).'); }
 }
 
   /* selo de versao: lido da constante unica, nunca escrito a mao no HTML */
