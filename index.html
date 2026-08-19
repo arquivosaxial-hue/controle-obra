@@ -328,7 +328,7 @@
       <button class="tab" data-tab="financeiro">Financeiro</button>
       <button class="tab" data-tab="resumo">Resumo</button>
       <button class="tab" data-tab="beneficios">Benefícios (VR/VA)</button>
-      <button class="tab" data-tab="autoriz">Autorização E/S</button>
+      <button class="tab" id="tabAutoriz" data-tab="autoriz">Autorização E/S</button>
       <button class="tab" data-tab="historico">Histórico</button>
       <button class="tab" id="tabUsuarios" data-tab="usuarios" style="display:none">Usuários</button>
     </div>
@@ -690,7 +690,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.8';
+var APP_VERSION = '3.9';
 var APP_BUILD   = '2026-08-19';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -1599,6 +1599,17 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     if(tu){
       tu.style.display = isAdmin() ? '' : 'none';
       if(!isAdmin() && tab==='usuarios'){
+        document.querySelector('.tab[data-tab="todos"]').click();
+      }
+    }
+
+    /* aba Autorizacao E/S: importador e administrador. O leitor nao emite
+       documento em nome da obra. Aqui a trava e' so' de tela — nada e'
+       gravado no banco, entao nao ha RLS para reforcar isso no servidor. */
+    const ta=$('tabAutoriz');
+    if(ta){
+      ta.style.display = canEdit() ? '' : 'none';
+      if(!canEdit() && tab==='autoriz'){
         document.querySelector('.tab[data-tab="todos"]').click();
       }
     }
@@ -2898,6 +2909,7 @@ function autBox(marcado){
 }
 
 function autGerar(){
+  if(!canEdit()){ autMsg('Seu perfil não emite autorização. Fale com o administrador.',true); return; }
   var sel=$('autCol');
   var r=sel ? rows.filter(function(x){ return String(x.id)===String(sel.value); })[0] : null;
   if(!r){ autMsg('Escolha o colaborador antes de gerar.',true); return; }
