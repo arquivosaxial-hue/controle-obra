@@ -690,7 +690,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.7';
+var APP_VERSION = '3.8';
 var APP_BUILD   = '2026-08-19';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -729,15 +729,21 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
   function podeVerBeneficios(){ return !!session && !!meuPapel; }
 
   async function carregaPapel(){
-    meuPapel = null;
-    if(!sb || !session || !session.user || !session.user.email) return;
-    try{
-      const { data } = await sb.from('perfis')
-        .select('papel,ativo')
-        .eq('email', String(session.user.email).toLowerCase())
-        .maybeSingle();
-      if(data && data.ativo) meuPapel = data.papel;
-    }catch(e){ meuPapel = null; }
+    /* ATENCAO: nao zerar meuPapel aqui no inicio. Entre o zero e a resposta
+       do banco existe uma janela em que isAdmin() responde falso, e quem
+       renderizar nessa janela esconde coisas que deveriam aparecer.
+       Monta o valor novo numa variavel local e so troca no fim. */
+    let novo = null;
+    if(sb && session && session.user && session.user.email){
+      try{
+        const { data } = await sb.from('perfis')
+          .select('papel,ativo')
+          .eq('email', String(session.user.email).toLowerCase())
+          .maybeSingle();
+        if(data && data.ativo) novo = data.papel;
+      }catch(e){ novo = null; }
+    }
+    meuPapel = novo;
   }
 
   function parseDate(s){ if(!s) return null; const p=String(s).split('-'); if(p.length<3) return null; const d=new Date(+p[0],+p[1]-1,+p[2]); d.setHours(0,0,0,0); return isNaN(d)?null:d; }
@@ -799,14 +805,17 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
      A RLS de colaboradores_cpf devolve vazio para leitor e importador.
      Isso nao e' erro: e' o comportamento esperado. */
   const CPF_TABLE='colaboradores_cpf';
+  let cpfCarregado=false;
   async function loadCPF(){
     rows.forEach(r=>{ r.cpf=''; });
+    cpfCarregado=false;
     if(!sb || !isAdmin()) return;
     try{
       const { data, error } = await sb.from(CPF_TABLE).select('colaborador_id,cpf');
       if(error) throw error;
       const m={}; (data||[]).forEach(x=>{ m[x.colaborador_id]=x.cpf; });
       rows.forEach(r=>{ if(m[r.id]!=null) r.cpf=m[r.id]; });
+      cpfCarregado=true;
     }catch(e){ /* sem CPF a tela continua inteira; nao vale travar o app por isso */ }
   }
   async function saveCPF(){
@@ -1551,7 +1560,7 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     if(!sb) return;
     await sb.auth.signOut(); session=null; meuPapel=null;
     $('gateEmail').value=''; $('gatePass').value=''; $('gateMsg').textContent='';
-    rows=[]; render();          /* limpa a tela antes de reexibir a entrada */
+    rows=[]; cpfCarregado=false; render();   /* limpa a tela antes de reexibir a entrada */
     applyAuthUI();
   }
   function applyAuthUI(){
@@ -1602,6 +1611,14 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
       ['benefPdfBtn','benefSaveBtn','benefXlsxBtn'].forEach(id=>{
         const b=$(id); if(b && !edita) b.disabled=true;
       });
+    }
+
+    /* O papel pode chegar depois do primeiro desenho (sessao restaurada,
+       token renovado). Sem este trecho a tela fica congelada no papel
+       antigo — foi assim que a coluna CPF sumiu para o proprio admin. */
+    if(rows.length){
+      if(isAdmin() && !cpfCarregado) loadCPF().then(render);
+      else render();
     }
   }
 
