@@ -690,7 +690,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.9';
+var APP_VERSION = '3.9.1';
 var APP_BUILD   = '2026-08-19';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -2907,6 +2907,13 @@ function autVal(nome){
 function autBox(marcado){
   return '<span class="bx">['+(marcado?'<b>X</b>':'&nbsp;&nbsp;')+']</span>';
 }
+/* horario: quando vazio, espaco em branco de verdade.
+   O &nbsp; NAO pode passar por autEsc(), senao o & vira &amp; e o
+   codigo da entidade aparece impresso no formulario. */
+function autHora(v){
+  var t=String(v==null?'':v).trim();
+  return '<span class="bx">[ '+(t?autEsc(t):'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')+' ]</span>';
+}
 
 function autGerar(){
   if(!canEdit()){ autMsg('Seu perfil não emite autorização. Fale com o administrador.',true); return; }
@@ -2993,14 +3000,12 @@ function autGerar(){
 
   /* horarios + retorno */
   h+='<tr>'+
-       '<td colspan="2"><span class="k">Horário de Saída:</span> '+
-         '<span class="bx">[ '+autEsc(hSaida||'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')+' ]</span></td>'+
+       '<td colspan="2"><span class="k">Horário de Saída:</span> '+autHora(hSaida)+'</td>'+
        '<td rowspan="2"><span class="k">Previsto retorno à empresa:</span><br>'+
          autBox(ret==='sim')+' Sim&nbsp;&nbsp;&nbsp;'+autBox(ret==='nao')+' Não</td>'+
      '</tr>';
   h+='<tr>'+
-       '<td colspan="2"><span class="k">Horário de Chegada:</span> '+
-         '<span class="bx">[ '+autEsc(hCheg||'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;')+' ]</span></td>'+
+       '<td colspan="2"><span class="k">Horário de Chegada:</span> '+autHora(hCheg)+'</td>'+
      '</tr>';
 
   /* justificado a */
