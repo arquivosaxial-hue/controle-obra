@@ -690,7 +690,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.9.1';
+var APP_VERSION = '3.10';
 var APP_BUILD   = '2026-08-19';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -1994,6 +1994,18 @@ function benefTrabalhou(resto){
   return campos[campos.length-1]!=='00:00';
 }
 
+/* Detecta o dia de compensacao no espelho. Aceita tanto o motivo numerico
+   quanto a palavra escrita, porque a grafia do Wponto varia entre relatorios
+   e um detector unico falharia em silencio — sem erro na tela, so' o numero
+   errado no fim. Cobre COMPENSACAO, COMPENSADO, COMPENSA-. */
+function benefEhCompensacao(r){
+  var t=(r||'').toUpperCase();
+  if(/\b0*9\b/.test(t) && /COMPENS/.test(t)) return true;   /* 9 ou 000009 com o texto junto */
+  if(/\b000009\b/.test(t)) return true;                      /* so' o motivo numerico */
+  if(/COMPENS[AÇC]/.test(t)) return true;                    /* so' o texto */
+  return false;
+}
+
 function benefCodigo(dow, resto, licDias, ehFeriado){
   var r = (resto||'').toUpperCase();
   var fds = (dow==='sáb'||dow==='sab'||dow==='dom');
@@ -2010,6 +2022,12 @@ function benefCodigo(dow, resto, licDias, ehFeriado){
     return fds ? 'AFS' : 'A';
   }
   if(r.indexOf('FÉRIAS')>=0 || r.indexOf('FERIAS')>=0) return 'FE';
+  /* COMPENSACAO (motivo 000009): troca de dia, nao trabalho a mais nem ausencia.
+     Precisa vir ANTES de '* FALTA' e antes do teste de fim de semana, senao o
+     sabado compensado viraria S (+1) e o dia util viraria F (-1) — erro dos
+     dois lados. Retornando 'C' o dia aparece na grade mas nao entra em nenhum
+     COUNTIF da planilha, que e' exatamente o efeito neutro desejado. */
+  if(benefEhCompensacao(r)) return 'C';
   if(r.indexOf('* FALTA')>=0) return 'F';
   if(/\b0000(30|23)\b/.test(r)) return 'E';
   /* fim de semana trabalhado: S/D tem precedencia sobre FR (evita contagem dupla) */
@@ -2175,7 +2193,7 @@ async function benefProcessaPdf(file){
       if(noPeriodo[benefIsoDe(x[0])] && x[2].toUpperCase().indexOf('LICEN')>=0) licDias++;
     });
 
-    var c={S:0,D:0,FR:0,F:0,A:0,AFS:0,FA:0,FE:0,E:0,IN:0};
+    var c={S:0,D:0,FR:0,F:0,A:0,AFS:0,FA:0,FE:0,E:0,IN:0,C:0};
     var ocor=[], extras=[], suspeitos=[], atestComp=[];
     dias.forEach(function(x){
       var iso=benefIsoDe(x[0]); if(!noPeriodo[iso]) return;
@@ -2627,6 +2645,7 @@ async function benefGerarXlsx(){
     ['FA','Falta abonada','−1 dia'],
     ['FE','Férias','Nenhum – o sistema do benefício já trata automaticamente'],
     ['E','Exame periódico / troca de função','Nenhum – estava a serviço da empresa'],
+    ['C','Compensação de dia (motivo 000009)','Nenhum – o dia foi trocado, não é dia extra nem falta'],
     ['IN','Afastamento INSS (acima de 15 dias)','Zera o benefício do mês'],
     [],['FÓRMULA DE CÁLCULO'],
     ['Dias de benefício = Dias úteis do mês (célula C4 da aba CONTROLE) + Sábados + Domingos + Feriados − Faltas − Atestados em dia útil − Faltas abonadas'],
@@ -2654,6 +2673,7 @@ async function benefGerarXlsx(){
     ['• Atestado de comparecimento (motivo 000025): se o colaborador compareceu no dia, não desconta; se não compareceu, entra como atestado (A).'],
     ['• Dias úteis com mais de '+Math.floor(BENEF_EXTRA_MAX/60)+'h de hora extra foram tratados como erro de marcação: o dia vale, mas não gera o adicional de 3h. Constam na aba PENDÊNCIAS para lançamento manual.'],
     ['• CESTA BÁSICA: perde-se o benefício do mês inteiro com qualquer FALTA injustificada (código F) no período, ou com afastamento pelo INSS (código IN). Falta abonada (FA) e atestado (A) não tiram a cesta. Sem perda = SIM (verde); com perda = NÃO (vermelho). A coluna é fórmula: se você corrigir um código na grade, ela se ajusta sozinha.'],
+    ['• COMPENSAÇÃO (motivo 000009, código C): quando o colaborador troca um dia por outro, os dois lados ficam neutros — o sábado ou domingo compensado NÃO conta como dia extra, e o dia útil correspondente NÃO conta como falta. O código aparece na grade apenas para rastreabilidade.'],
     ['• Colaboradores com situação AFASTADO no cadastro têm o benefício zerado, independentemente do que consta no espelho de ponto.'],
     ['• Feriados informados: '+((c.feriados||'').split(',').filter(Boolean)
         .map(function(x){return x.split('-').reverse().join('/');}).join(', ')||'nenhum')+
