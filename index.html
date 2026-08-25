@@ -95,6 +95,11 @@
   tr.fin-total td.num{ color:var(--axial-d) }
   #view-financeiro .nm{ font-weight:700 }
   #view-financeiro .cpf-cell{ font-variant-numeric:tabular-nums; white-space:nowrap; color:#475569 }
+  #view-financeiro .exp-cell{ white-space:nowrap; line-height:1.25 }
+  .exp-badge{ display:inline-block; border:1.5px solid; border-radius:20px; padding:1px 9px;
+    font-size:.72rem; font-weight:800 }
+  .exp-sub{ display:block; font-size:.7rem; color:var(--muted); margin-top:2px }
+  .exp-na{ color:#94a3b8 }
   #view-financeiro.nocpf .cpf-cell,
   #view-financeiro.nocpf thead th[data-sort="cpf"]{ display:none }
   .cell-input.dataprev:hover{ border-color:var(--amber) }
@@ -372,6 +377,12 @@
     </div>
 
     <div id="view-financeiro" style="display:none">
+      <div class="ferias-filter" id="expFiltro">
+        <span class="ff-lbl">Experiência:</span>
+        <button class="ffbtn active" data-exp="todos">Todos</button>
+        <button class="ffbtn" data-exp="dentro">Em experiência</button>
+        <button class="ffbtn" data-exp="vence">Vence em 15 dias</button>
+      </div>
       <div class="card">
         <table>
           <thead><tr>
@@ -380,14 +391,15 @@
             <th data-sort="cpf">CPF</th>
             <th data-sort="funcao">Função</th>
             <th data-sort="tempo">Tempo de casa</th>
+            <th data-sort="experiencia">Experiência</th>
             <th data-sort="status">Situação</th>
             <th data-sort="salario" class="num">Salário (R$)</th>
           </tr></thead>
           <tbody id="tbodyFin"></tbody>
-          <tfoot><tr class="fin-total"><td colspan="6" id="fin-total-lbl">Total da folha (ativos)</td><td class="num" id="fin-total">R$ 0,00</td></tr></tfoot>
+          <tfoot><tr class="fin-total"><td colspan="7" id="fin-total-lbl">Total da folha (ativos)</td><td class="num" id="fin-total">R$ 0,00</td></tr></tfoot>
         </table>
       </div>
-      <p class="hint">✎ Edite o salário aqui — os valores são exibidos com duas casas decimais. O <b>CPF</b> vem da planilha de efetivo e não é editável em tela; para corrigir, reimporte ou peça o SQL. Colaboradores desligados não entram no total da folha.</p>
+      <p class="hint">✎ Edite o salário aqui — os valores são exibidos com duas casas decimais. O <b>CPF</b> vem da planilha de efetivo e não é editável em tela; para corrigir, reimporte ou peça o SQL. A <b>experiência</b> é calculada a partir da admissão: 45 dias no 1º período e 90 no total, contando o dia da admissão como primeiro dia. Colaboradores desligados não entram no total da folha.</p>
     </div>
 
     <div id="view-exames" style="display:none">
@@ -690,7 +702,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.10';
+var APP_VERSION = '3.11';
 var APP_BUILD   = '2026-08-19';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -706,7 +718,7 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
      para popular o banco na primeira carga, o que ja' foi feito ha' muito. */
   const TABLE='colaboradores';
   const HORIZON=60;
-  let rows=[], sortKey='nome', sortDir=1, tab='todos', feriasFilter='60', sitFilter='todos', asoFilter='todos';
+  let rows=[], sortKey='nome', sortDir=1, tab='todos', feriasFilter='60', sitFilter='todos', asoFilter='todos', expFilter='todos';
   let sb=null, session=null;
   const root=document.getElementById('dts-root');
   const $=id=>document.getElementById(id);
@@ -750,6 +762,36 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
   function fmtDate(s){ const d=parseDate(s); return d? d.toLocaleDateString('pt-BR'):'—'; }
   function fmtDiaSemana(s){ const d=parseDate(s); if(!d) return ''; const dia=d.toLocaleDateString('pt-BR',{weekday:'long'}); return dia.charAt(0).toUpperCase()+dia.slice(1)+', '+d.toLocaleDateString('pt-BR'); }
   function daysTo(s){ const d=parseDate(s); if(!d) return null; return Math.round((d-today)/864e5); }
+
+  /* ---------- contrato de experiência ----------
+     Contagem pela CLT: o dia da admissão é o 1º dia. Quem entra em 01/09
+     encerra o 1º período em 15/10 (44 dias somados), não em 16/10.
+     Por isso somamos 44 e 89, e não 45 e 90 — um dia a mais aqui
+     transformaria dispensa dentro da experiência em dispensa sem justa causa.
+     Soma feita em aritmética local: Date + setDate não passa por UTC. */
+  const EXP_1=45, EXP_2=90, EXP_AVISO=15;
+  function addDiasLocal(iso,n){
+    const p=String(iso).split('-');
+    if(p.length<3) return null;
+    const d=new Date(+p[0],+p[1]-1,+p[2]);
+    d.setDate(d.getDate()+n);
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+  /* devolve null quando nao ha admissao ou quando a experiencia ja terminou */
+  function expInfo(r){
+    if(!r.admissao || !parseDate(r.admissao)) return null;
+    if(sitKey(r)==='desligado') return null;
+    const f1=addDiasLocal(r.admissao,EXP_1-1);
+    const f2=addDiasLocal(r.admissao,EXP_2-1);
+    if(!f1||!f2) return null;
+    const d1=daysTo(f1), d2=daysTo(f2);
+    if(d2<0) return null;                      /* experiencia encerrada */
+    const noPrimeiro = d1>=0;
+    return { periodo:noPrimeiro?1:2,
+             fim:noPrimeiro?f1:f2,
+             dias:noPrimeiro?d1:d2,
+             fim1:f1, fim2:f2 };
+  }
   function fmtMoney(v){ if(v==null||v==='') return '—'; return Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   /* CPF: mostra 000.000.000-00. Se vier com tamanho estranho, devolve como esta —
      melhor exibir o valor cru do que esconder um cadastro torto. */
@@ -758,6 +800,16 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     const d=String(v).replace(/\D/g,'');
     if(d.length!==11) return String(v);
     return d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6,9)+'-'+d.slice(9);
+  }
+  function expCelula(r){
+    const e=expInfo(r);
+    if(!e) return '<span class="exp-na">—</span>';
+    const urgente = e.dias<=EXP_AVISO;
+    const cor = urgente ? (e.dias<=5?'var(--red)':'var(--amber)') : 'var(--axial)';
+    const txt = e.dias===0 ? 'vence hoje' : (e.dias===1?'falta 1 dia':'faltam '+e.dias+' dias');
+    return '<span class="exp-badge" style="border-color:'+cor+';color:'+cor+'">'+
+             e.periodo+'º período</span>'+
+           '<span class="exp-sub">até '+fmtDate(e.fim)+' &middot; '+txt+'</span>';
   }
 
   /* O CPF saiu desta lista: ele mora na tabela colaboradores_cpf, que so
@@ -926,6 +978,15 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
       let x,y;
       if(sortKey==='salario'){x=+a.salario||0;y=+b.salario||0;return (x-y)*sortDir;}
       if(sortKey==='tempo'){x=a.admissao||'';y=b.admissao||'';return x.localeCompare(y,'pt-BR')*sortDir;} // mais antigo primeiro = asc
+      /* experiencia: quem vence antes vem primeiro; quem ja saiu do periodo
+         fica sempre no fim, nos dois sentidos da ordenacao */
+      if(sortKey==='experiencia'){
+        const ea=expInfo(a), eb=expInfo(b);
+        if(!ea && !eb) return (a.nome||'').localeCompare(b.nome||'','pt-BR');
+        if(!ea) return 1;
+        if(!eb) return -1;
+        return (ea.dias-eb.dias)*sortDir;
+      }
       x=(a[sortKey]||'').toString(); y=(b[sortKey]||'').toString();
       return x.localeCompare(y,'pt-BR')*sortDir;
     });
@@ -974,10 +1035,19 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     const vf=$('view-financeiro');
     if(vf) vf.classList.toggle('nocpf', !isAdmin());
     const ftl=$('fin-total-lbl');
-    if(ftl) ftl.colSpan = isAdmin()?6:5;
+    if(ftl) ftl.colSpan = isAdmin()?7:6;
     const fb=$('tbodyFin'); fb.innerHTML='';
-    if(!list.length){ fb.innerHTML='<tr><td colspan="7" class="empty">Nenhum colaborador encontrado.</td></tr>'; }
-    list.forEach(r=>{
+    /* o filtro de experiencia vale so' para esta aba; nao mexe na lista das outras */
+    let finList=list;
+    if(expFilter==='dentro') finList=list.filter(r=>!!expInfo(r));
+    else if(expFilter==='vence') finList=list.filter(r=>{ const e=expInfo(r); return e && e.dias<=EXP_AVISO; });
+    if(!finList.length){
+      fb.innerHTML='<tr><td colspan="8" class="empty">'+
+        (expFilter==='todos'?'Nenhum colaborador encontrado.'
+         :(expFilter==='vence'?'Ninguém com experiência vencendo nos próximos 15 dias. 👍'
+                              :'Ninguém em contrato de experiência no momento.'))+'</td></tr>';
+    }
+    finList.forEach(r=>{
       const sk=sitKey(r);
       const tr=document.createElement('tr'); tr.dataset.id=r.id;
       if(sk==='desligado') tr.className='inativo'; else if(sk==='afastado') tr.className='afastado-row';
@@ -988,6 +1058,7 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
         '<td class="cpf-cell">'+esc(fmtCPF(r.cpf))+'</td>'+
         '<td>'+esc(r.funcao||'—')+'</td>'+
         '<td class="tempo-cell">'+(tempoCasa(r)||'—')+'</td>'+
+        '<td class="exp-cell">'+expCelula(r)+'</td>'+
         '<td><span class="pill '+pillCls+'">'+SIT_META[sk].label+'</span></td>'+
         '<td class="num"><div class="money-cell"><span class="rs">R$</span><input class="cell-input fin-sal" type="text" inputmode="decimal" data-f="salario" value="'+esc(r.salario==null?'':Number(r.salario).toFixed(2))+'"></div></td>';
       fb.appendChild(tr);
@@ -1163,15 +1234,24 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
       if(tab==='usuarios') usrInit();
     });
   });
-  document.querySelectorAll('.ffbtn').forEach(b=>{
+  /* Filtros distintos compartilham a classe .ffbtn so' pela aparencia.
+     Os seletores precisam qualificar pelo data-*, senao um clique no filtro
+     de experiencia mexeria no de ferias e vice-versa. */
+  document.querySelectorAll('.ffbtn[data-ff]').forEach(b=>{
     b.addEventListener('click',()=>{
-      document.querySelectorAll('.ffbtn').forEach(x=>x.classList.remove('active'));
+      document.querySelectorAll('.ffbtn[data-ff]').forEach(x=>x.classList.remove('active'));
       b.classList.add('active'); feriasFilter=b.dataset.ff;
       const h=$('feriasHint');
       h.textContent = feriasFilter==='all'
         ? 'Todos os colaboradores com previsão de férias, em ordem de vencimento (do mais próximo ao mais distante).'
         : 'Colaboradores que precisam ter as férias concedidas nos próximos '+feriasFilter+' dias (a partir de hoje), em ordem de vencimento.';
       render();
+    });
+  });
+  document.querySelectorAll('.ffbtn[data-exp]').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('.ffbtn[data-exp]').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active'); expFilter=b.dataset.exp; render();
     });
   });
   document.querySelectorAll('.sfbtn').forEach(b=>{
