@@ -371,6 +371,7 @@
         <button class="ffbtn active" data-ff="60">Próximos 60 dias</button>
         <button class="ffbtn" data-ff="90">Próximos 90 dias</button>
         <button class="ffbtn" data-ff="all">Todos por vencimento</button>
+        <button class="ffbtn" data-ff="prev">Todos por previsão</button>
       </div>
       <div class="card" id="feriasList"></div>
       <p class="hint" id="feriasHint">Colaboradores que precisam ter as férias concedidas nos próximos 60 dias (a partir de hoje), em ordem de vencimento.</p>
@@ -702,7 +703,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.11';
+var APP_VERSION = '3.12';
 var APP_BUILD   = '2026-08-19';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -956,6 +957,18 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
   }
   function feriasFiltered(){
     let list=rows.filter(emCampo).filter(r=>daysTo(r.concederAte)!=null);
+    /* por previsao: mesma lista do "todos", so' muda a ordem. Quem ainda nao
+       tem data prevista vai para o fim, em vez de sumir — sumir esconderia
+       justamente quem falta planejar. */
+    if(feriasFilter==='prev'){
+      return list.sort((a,b)=>{
+        const pa=a.dataPrevista||'', pb=b.dataPrevista||'';
+        if(!pa && !pb) return daysTo(a.concederAte)-daysTo(b.concederAte);
+        if(!pa) return 1;
+        if(!pb) return -1;
+        return pa.localeCompare(pb);
+      });
+    }
     if(feriasFilter!=='all') list=list.filter(r=>daysTo(r.concederAte)<=(+feriasFilter));
     return list.sort((a,b)=>daysTo(a.concederAte)-daysTo(b.concederAte));
   }
@@ -1018,7 +1031,7 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
 
     // ferias view
     const fs=feriasFiltered(); const fl=$('feriasList'); fl.innerHTML='';
-    if(!fs.length){ fl.innerHTML='<div class="empty">'+(feriasFilter==='all'?'Nenhum colaborador com previsão de férias registrada.':'Nenhum colaborador com férias a conceder nesse período. 👍')+'</div>'; }
+    if(!fs.length){ fl.innerHTML='<div class="empty">'+((feriasFilter==='all'||feriasFilter==='prev')?'Nenhum colaborador com previsão de férias registrada.':'Nenhum colaborador com férias a conceder nesse período. 👍')+'</div>'; }
     fs.forEach(r=>{
       const d=daysTo(r.concederAte); const over=d<0;
       const col=over?'var(--red)':(d<=30?'var(--amber)':(d<=60?'#d99100':'var(--axial)'));
@@ -1244,6 +1257,8 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
       const h=$('feriasHint');
       h.textContent = feriasFilter==='all'
         ? 'Todos os colaboradores com previsão de férias, em ordem de vencimento (do mais próximo ao mais distante).'
+        : feriasFilter==='prev'
+        ? 'Todos os colaboradores, em ordem de data prevista das férias. Quem ainda não tem previsão aparece no fim da lista.'
         : 'Colaboradores que precisam ter as férias concedidas nos próximos '+feriasFilter+' dias (a partir de hoje), em ordem de vencimento.';
       render();
     });
