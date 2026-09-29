@@ -320,6 +320,7 @@
       </div>
       <button class="btn btn-pri" id="importBtn">⬆ Importar planilha</button>
       <button class="btn btn-ghost" id="addBtn">+ Colaborador</button>
+      <button class="btn btn-ghost" id="saveBtn" title="Grava na nuvem tudo o que está na tela">💾 Salvar agora</button>
       <button class="btn btn-amber" id="dtsBtn">⬇ Exportar DDS</button>
       <button class="btn btn-ghost" id="csvBtn">⬇ Exportar CSV</button>
       <input type="file" id="fileInput" accept=".xls,.xlsx,.csv" multiple style="display:none">
@@ -703,7 +704,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.12';
+var APP_VERSION = '3.14';
 var APP_BUILD   = '2026-08-19';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -860,24 +861,37 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
   const CPF_TABLE='colaboradores_cpf';
   let cpfCarregado=false;
   async function loadCPF(){
-    rows.forEach(r=>{ r.cpf=''; });
-    cpfCarregado=false;
-    if(!sb || !isAdmin()) return;
-    try{
-      const { data, error } = await sb.from(CPF_TABLE).select('colaborador_id,cpf');
-      if(error) throw error;
-      const m={}; (data||[]).forEach(x=>{ m[x.colaborador_id]=x.cpf; });
-      rows.forEach(r=>{ if(m[r.id]!=null) r.cpf=m[r.id]; });
-      cpfCarregado=true;
-    }catch(e){ /* sem CPF a tela continua inteira; nao vale travar o app por isso */ }
+    if(!sb || !isAdmin()){ rows.forEach(r=>{ r.cpf=''; }); cpfCarregado=false; return; }
+    /* ATENCAO: nao zerar r.cpf antes de ler. Se a leitura falhar, o zero
+       apaga da memoria um CPF que veio da planilha e ainda nao foi gravado —
+       o dado some da tela sem ninguem saber por que. Monta o mapa primeiro
+       e so' entao aplica. */
+    const { data, error } = await sb.from(CPF_TABLE).select('colaborador_id,cpf');
+    if(error){
+      cpfCarregado=false;
+      banner('Não consegui ler os CPFs: '+error.message, true);
+      return;
+    }
+    const m={}; (data||[]).forEach(x=>{ m[x.colaborador_id]=x.cpf; });
+    rows.forEach(r=>{ r.cpf = (m[r.id]!=null) ? m[r.id] : ''; });
+    cpfCarregado=true;
   }
+  /* Grava os CPFs que estao em memoria. Devolve true/false para quem chamou
+     poder avisar o usuario. */
   async function saveCPF(){
-    if(!sb || !canEdit()) return;
+    if(!sb || !canEdit()) return true;
     const lote=rows.filter(r=>r.cpf!=null && String(r.cpf).trim()!=='')
       .map(r=>({ colaborador_id:r.id, cpf:String(r.cpf).trim(), atualizado_em:new Date().toISOString() }));
-    if(!lote.length) return;
-    try{ await sb.from(CPF_TABLE).upsert(lote); }
-    catch(e){ /* o efetivo ja foi salvo; o CPF pode ser reenviado numa proxima importacao */ }
+    if(!lote.length) return true;
+    /* ATENCAO: o supabase-js NAO lanca excecao em erro — devolve {error}.
+       try/catch sozinho nunca dispara e a falha passa despercebida.
+       Sempre conferir o campo error. */
+    const { error } = await sb.from(CPF_TABLE).upsert(lote, { onConflict:'colaborador_id' });
+    if(error){
+      banner('Erro ao salvar os CPFs: '+error.message, true);
+      return false;
+    }
+    return true;
   }
 
   let saveT;
@@ -886,8 +900,12 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     try{
       const { error } = await sb.from(TABLE).upsert(rows.map(toDb));
       if(error) throw error;
-      if(flash) showFlash();
-    }catch(e){ banner('Erro ao salvar: '+e.message, true); }
+      /* o CPF vive em outra tabela: sem esta chamada, qualquer edicao feita
+         na tela salvava tudo menos o CPF, que sumia no proximo recarregamento */
+      const okCpf = await saveCPF();
+      if(flash && okCpf) showFlash();
+      return okCpf;
+    }catch(e){ banner('Erro ao salvar: '+e.message, true); return false; }
   }
   async function removeRow(id){
     if(!sb || !canEdit()) return;
@@ -1231,6 +1249,19 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     $('search').value=''; sortKey='nome'; sitFilter='todos'; save(); render();
     setTimeout(()=>{ const f=document.querySelector('tbody tr [data-f="nome"]'); if(f){f.focus();f.select();} },50);
   });
+  /* Salvar manual. O app ja' salva sozinho ao sair de cada campo; este botao
+     existe para quem quer confirmar antes de fechar a pagina — e porque forcar
+     o salvamento criando um colaborador em branco e' pedir para sujar a base. */
+  const saveBtnEl=$('saveBtn');
+  if(saveBtnEl) saveBtnEl.addEventListener('click', async ()=>{
+    if(!canEdit()) return;
+    const txt=saveBtnEl.textContent;
+    saveBtnEl.disabled=true; saveBtnEl.textContent='Salvando...';
+    const ok = await save(false);
+    if(ok){ saveBtnEl.textContent='✓ Salvo'; showFlash(); }
+    else   { saveBtnEl.textContent='⚠ Não salvou'; }
+    setTimeout(()=>{ saveBtnEl.textContent=txt; saveBtnEl.disabled=!canEdit(); },1600);
+  });
   document.querySelectorAll('thead th[data-sort]').forEach(th=>{
     th.addEventListener('click',()=>{ const k=th.dataset.sort; if(sortKey===k) sortDir*=-1; else {sortKey=k;sortDir=1;} render(); });
   });
@@ -1565,7 +1596,11 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     try{
       const { error } = await sb.from(TABLE).upsert(rows.map(toDb));
       if(error) throw error;
-      await saveCPF();   /* o CPF vai para a tabela protegida, nunca para colaboradores */
+      /* o CPF vai para a tabela protegida, nunca para colaboradores.
+         Se falhar, o usuario precisa saber: antes a falha era muda e o CPF
+         reaparecia vazio no recarregamento seguinte. */
+      const okCpf = await saveCPF();
+      if(!okCpf) msg+='<br><b style="color:#b23">⚠ Os CPFs não foram gravados.</b> O restante foi salvo. Veja a mensagem de erro no topo da página.';
       showFlash();
       logHist('importou planilha', null, u+' atualizado(s), '+a+' adicionado(s)'+(r?', '+r+' reativado(s)':'')+(desligados.length?', '+desligados.length+' desligado(s)':''));
       desligados.forEach(n=>logHist('situação', n, 'Ativo → Desligado (efetivo importado)'));
@@ -1685,7 +1720,7 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     root.classList.toggle('readonly', !edita);
     // habilita/desabilita controles de edição
     document.querySelectorAll('.cell-input, .sit-sel').forEach(el=>{ el.disabled=!edita; });
-    ['addBtn','importBtn'].forEach(id=>{ const b=$(id); if(b) b.disabled=!edita; });
+    ['addBtn','importBtn','saveBtn'].forEach(id=>{ const b=$(id); if(b) b.disabled=!edita; });
     $('roBadge').style.display=edita?'none':'';
 
     /* aba Usuarios: so' admin. Esconder aqui e' conveniencia — quem barra
