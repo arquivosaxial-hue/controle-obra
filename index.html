@@ -325,6 +325,13 @@
       <button class="btn btn-ghost" id="csvBtn">⬇ Exportar CSV</button>
       <input type="file" id="fileInput" accept=".xls,.xlsx,.csv" multiple style="display:none">
     </div>
+    <div id="impProg" class="benef-prog" style="display:none;margin:8px 0 0">
+      <div class="benef-prog-bar"><div class="benef-prog-fill" id="impProgFill"></div></div>
+      <div class="benef-prog-txt">
+        <span id="impProgLbl">Lendo a planilha...</span>
+        <span id="impProgPct">0%</span>
+      </div>
+    </div>
     <div id="importMsg" class="importmsg" style="display:none"></div>
 
     <div class="tabs">
@@ -704,7 +711,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.14';
+var APP_VERSION = '3.15';
 var APP_BUILD   = '2026-08-19';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -1535,13 +1542,44 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     m.innerHTML='<span class="x" onclick="this.parentNode.style.display=\'none\'">&times;</span>'+html;
   }
 
+  /* ---- barra de progresso da importacao ----
+     A leitura da planilha e' sincrona e trava a tela; sem indicacao nenhuma
+     nao da' para saber se a importacao terminou ou nem comecou. */
+  function impProg(pct, lbl){
+    const box=$('impProg'); if(!box) return;
+    box.style.display='';
+    if(pct!=null){
+      pct=Math.max(0,Math.min(100,Math.round(pct)));
+      $('impProgFill').style.width=pct+'%';
+      $('impProgPct').textContent=pct+'%';
+    }
+    if(lbl) $('impProgLbl').textContent=lbl;
+  }
+  function impProgFim(){
+    const b=$('importBtn');
+    if(b){ b.disabled=!canEdit(); if(b.dataset.txt){ b.textContent=b.dataset.txt; delete b.dataset.txt; } }
+    const box=$('impProg'); if(!box) return;
+    $('impProgFill').style.width='100%'; $('impProgPct').textContent='100%';
+    setTimeout(()=>{ box.style.display='none'; $('impProgFill').style.width='0%'; },600);
+  }
+  /* cede o controle ao navegador para a barra realmente repintar */
+  function impTick(){ return new Promise(r=>setTimeout(r,0)); }
+
   function handleFiles(files){
     if(typeof XLSX==='undefined'){ showImportMsg('A biblioteca de leitura de planilhas não carregou. Verifique sua conexão e recarregue a página.',true); return; }
     let totU=0,totA=0,totR=0,allNew=[],done=0,errs=[];
     let anyEfetivo=false; const seenKeys=new Set();
+    const nArq=files.length;
+    /* trava o botao enquanto roda: um segundo clique durante a leitura
+       faria duas importacoes concorrerem sobre a mesma lista em memoria */
+    const impBtn=$('importBtn');
+    if(impBtn){ impBtn.disabled=true; impBtn.dataset.txt=impBtn.textContent; impBtn.textContent='⏳ Importando...'; }
+    impProg(5, nArq>1 ? 'Lendo '+nArq+' planilhas...' : 'Lendo a planilha...');
     Array.from(files).forEach(file=>{
       const rd=new FileReader();
-      rd.onload=e=>{
+      rd.onload=async e=>{
+        impProg(20+(done/nArq)*40, 'Interpretando '+file.name+'...');
+        await impTick();
         try{
           const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true});
           let recs=[]; let fileIsEfetivo=false;
@@ -1556,9 +1594,10 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
           const r=mergeRecords(recs, fileIsEfetivo);
           totU+=r.updated; totA+=r.added; totR+=r.reactivated; allNew=allNew.concat(r.names);
         }catch(err){ errs.push(file.name+' ('+err.message+')'); }
-        if(++done===files.length){ finishImport(totU,totA,totR,allNew,errs,anyEfetivo,seenKeys); }
+        if(++done===nArq){ impProg(65,'Conferindo o efetivo...'); finishImport(totU,totA,totR,allNew,errs,anyEfetivo,seenKeys); }
+        else impProg(20+(done/nArq)*40);
       };
-      rd.onerror=()=>{ errs.push(file.name+' (falha na leitura)'); if(++done===files.length) finishImport(totU,totA,totR,allNew,errs,anyEfetivo,seenKeys); };
+      rd.onerror=()=>{ errs.push(file.name+' (falha na leitura)'); if(++done===nArq){ impProg(65,'Conferindo o efetivo...'); finishImport(totU,totA,totR,allNew,errs,anyEfetivo,seenKeys); } };
       rd.readAsArrayBuffer(file);
     });
   }
@@ -1590,12 +1629,17 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     if(!canEdit()){
       msg+='<br><b style="color:#b23">⚠ Alterações NÃO salvas:</b> faça login para gravar na nuvem e importe novamente.';
       showImportMsg(msg, true);
+      impProgFim();
       return;
     }
     showImportMsg(msg+'<br><span style="color:#0b6b4f">💾 Salvando na nuvem...</span>', (u+a+r+desligados.length)===0);
+    impProg(80,'Salvando o efetivo na nuvem...');
+    await impTick();
     try{
       const { error } = await sb.from(TABLE).upsert(rows.map(toDb));
       if(error) throw error;
+      impProg(92,'Salvando os CPFs...');
+      await impTick();
       /* o CPF vai para a tabela protegida, nunca para colaboradores.
          Se falhar, o usuario precisa saber: antes a falha era muda e o CPF
          reaparecia vazio no recarregamento seguinte. */
@@ -1605,8 +1649,10 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
       logHist('importou planilha', null, u+' atualizado(s), '+a+' adicionado(s)'+(r?', '+r+' reativado(s)':'')+(desligados.length?', '+desligados.length+' desligado(s)':''));
       desligados.forEach(n=>logHist('situação', n, 'Ativo → Desligado (efetivo importado)'));
       showImportMsg(msg+'<br><b style="color:#0b6b4f">✓ Salvo na nuvem.</b>', (u+a+r+desligados.length)===0);
+      impProg(100,'Concluído'); impProgFim();
     }catch(e){
       showImportMsg(msg+'<br><b style="color:#b23">⚠ Erro ao salvar na nuvem:</b> '+e.message+' — suas alterações estão na tela mas podem não ter sido gravadas. Tente novamente.', true);
+      impProgFim();
     }
   }
 
