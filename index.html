@@ -711,7 +711,7 @@
 <script src="config.js"></script>
 <script>
 /* ===== VERSAO — ponto unico de verdade. Alterar SO aqui. ===== */
-var APP_VERSION = '3.15';
+var APP_VERSION = '3.16';
 var APP_BUILD   = '2026-08-19';
 
 /* As chaves do Supabase ficam no arquivo separado config.js (no mesmo diretório).
@@ -1676,14 +1676,27 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
   }
   /* ---- login pela tela de entrada ---- */
   async function doGateLogin(){
-    if(!sb) return;
-    const email=$('gateEmail').value.trim(), pass=$('gatePass').value;
     const msg=$('gateMsg'), btn=$('gateBtn');
+    /* ATENCAO: antes isto era "if(!sb) return;" — sem Supabase o botao
+       simplesmente nao fazia nada, e o aviso de erro ficava atras da tela de
+       login (que cobre tudo com z-index 9999). Resultado: tela morta, sem
+       explicacao. Todo caminho de saida daqui precisa escrever em gateMsg. */
+    if(!sb){
+      msg.style.color='#b23';
+      msg.innerHTML='Não consegui falar com o servidor.<br>'+
+        '<span style="font-size:.9em">Recarregue com <b>Ctrl+Shift+R</b>. Se continuar, '+
+        'veja a mensagem em vermelho no topo desta tela.</span>';
+      return;
+    }
+    const email=$('gateEmail').value.trim(), pass=$('gatePass').value;
     if(!email||!pass){ msg.style.color='#b23'; msg.textContent='Informe e-mail e senha.'; return; }
     btn.disabled=true; btn.textContent='Entrando...';
     msg.style.color='#64748b'; msg.textContent='Verificando...';
     try{
-      const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+      /* limite de tempo: com o projeto Supabase pausado ou a rede caida a
+         chamada fica pendurada e o botao nunca volta. Melhor dizer o que houve. */
+      const { data, error } = await comLimite(
+        sb.auth.signInWithPassword({ email, password: pass }), 25000);
       if(error){
         msg.style.color='#b23';
         msg.textContent = /Invalid login/i.test(error.message||'')
@@ -1694,7 +1707,22 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
       await carregaPapel();
       if(!meuPapel){ applyAuthUI(); return; }   /* applyAuthUI escreve o aviso */
       msg.textContent=''; applyAuthUI(); await load();
+    }catch(e){
+      msg.style.color='#b23';
+      msg.innerHTML = /demorou/i.test(e.message||'')
+        ? 'O servidor não respondeu em 25 segundos.<br><span style="font-size:.9em">'+
+          'Pode ser queda de internet ou o banco de dados ter sido pausado por falta de uso. '+
+          'Tente de novo; se insistir, avise o administrador.</span>'
+        : 'Não consegui entrar: '+(e.message||e);
     }finally{ btn.disabled=false; btn.textContent='Entrar'; }
+  }
+  /* corre a promessa contra um relogio: sem isto uma chamada que nunca volta
+     deixa a tela parada para sempre, sem avisar nada ao usuario */
+  function comLimite(promessa, ms){
+    return Promise.race([
+      promessa,
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('A resposta demorou demais.')), ms))
+    ]);
   }
 
   /* ---- troca da propria senha ----
@@ -1810,8 +1838,40 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
   }
 
   async function start(){
-    if(!initSupabase()){ render(); return; }
-    const { data } = await sb.auth.getSession();
+    /* ATENCAO: os listeners sao registrados ANTES de falar com o Supabase.
+       Antes o start() saia cedo quando a conexao falhava e os botoes nunca
+       ganhavam listener — o "Entrar" ficava morto, sem clique e sem erro. */
+    $('gateBtn').addEventListener('click',doGateLogin);
+    ['gateEmail','gatePass'].forEach(id=>{
+      $(id).addEventListener('keydown',e=>{ if(e.key==='Enter') doGateLogin(); });
+    });
+
+    if(!initSupabase()){
+      /* o aviso vermelho fica atras da tela de login; repete aqui dentro */
+      const gm=$('gateMsg');
+      if(gm){
+        gm.style.color='#b23';
+        gm.innerHTML='Não foi possível iniciar a conexão com o servidor.<br>'+
+          '<span style="font-size:.9em">Recarregue com <b>Ctrl+Shift+R</b>. '+
+          'Se continuar, o arquivo <b>config.js</b> pode estar faltando no site '+
+          'ou a biblioteca do Supabase não carregou.</span>';
+      }
+      render(); return;
+    }
+
+    let data=null;
+    try{
+      const r = await comLimite(sb.auth.getSession(), 20000);
+      data = r && r.data ? r.data : null;
+    }catch(e){
+      const gm=$('gateMsg');
+      if(gm){
+        gm.style.color='#b23';
+        gm.innerHTML='O servidor não respondeu.<br><span style="font-size:.9em">'+
+          'Verifique a internet e recarregue. Se o problema continuar, o banco de '+
+          'dados pode ter sido pausado por falta de uso.</span>';
+      }
+    }
     session = data && data.session ? data.session : null;
     await carregaPapel();
     sb.auth.onAuthStateChange(async (_e,s)=>{
@@ -1820,10 +1880,6 @@ window.SUPABASE_CONFIG = window.SUPABASE_CONFIG || { url:"", anonKey:"" };
     $('loginBtn').addEventListener('click',doLogin);
     $('logoutBtn').addEventListener('click',doLogout);
     $('loginPass').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
-    $('gateBtn').addEventListener('click',doGateLogin);
-    ['gateEmail','gatePass'].forEach(id=>{
-      $(id).addEventListener('keydown',e=>{ if(e.key==='Enter') doGateLogin(); });
-    });
     $('pwdAbrir').addEventListener('click',()=>{
       $('pwdMsg').textContent='';
       ['pwdAtual','pwdNova','pwdNova2'].forEach(i=>{ $(i).value=''; });
